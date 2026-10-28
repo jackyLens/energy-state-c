@@ -57,7 +57,7 @@
 extern "C" {
 #endif
 
-#define ENERGY_VERSION "1.0.0"
+#define ENERGY_VERSION "1.0.1"
 
 /* 运行期版本字符串（用于日志/上报）。 */
 const char *energy_version(void);
@@ -170,18 +170,27 @@ int energy_config_validate(const energy_config_t *cfg, char *errbuf, size_t errl
 /* 一个 5 分钟样本。缺失值用 NAN；`load`/`activity` < 0 表示由库内部计算。 */
 typedef struct {
     double t_h;      /* 距起点小时数，必须单调递增 */
-    double tod;      /* 当地钟点 0–24；<0 时按 t_h % 24 推断 */
-    double stage[4]; /* 分期概率，和 ≤ 1；全 0 表示无分期记录 */
+    double tod;      /* 当地钟点 0–24；<0/NaN 时按 t_h % 24 推断 */
+    double stage[4]; /* wake/light/deep/rem 概率，和 ≤1。
+                      * 约定：全 0 = 无分期记录（日间）；和 >0.5 = 有记录（夜间观测方程）。
+                      * 白天请传全 0，不要传 wake=1——否则会走夜间观测方程。 */
     double hr;       /* bpm，缺失 NAN */
     double hrv_log;  /* ln(RMSSD/ms)，缺失 NAN */
-    double steps;    /* 每 5 分钟步数，可选 */
+    double steps;    /* 每 5 分钟步数，可选（算负荷/活动量用） */
     double kcal;     /* 每 5 分钟热量，可选 */
     double stress;   /* 0–1；若传 0–100 会被 /100 */
-    double q_hr;     /* 0–1，默认 1 */
-    double q_hrv;    /* 0–1，默认 1 */
-    double load;     /* <0: 内部计算；>=0: 直接使用（[0,1]） */
-    double activity; /* <0: 内部计算；>=0: 直接使用（[0,1]） */
+    double q_hr;     /* 观测质量 0–1；0 = 该点不参与更新；NaN 视为 0。不知道就传 1 */
+    double q_hrv;    /* 同上 */
+    double load;     /* 归一化负荷 L∈[0,1]，进状态方程；<0 = 由库计算 */
+    double activity; /* 活动量 A∈[0,1]，只进日间观测方程；<0 = 由库计算 */
 } energy_sample_t;
+
+/*
+ * 把样本初始化成“全缺失、质量正常、负荷/活动量交给库算”的默认状态：
+ *   hr/hrv_log = NAN, q_hr/q_hrv = 1, load/activity = -1, 其余 0。
+ * 直接 memset(0) 是**错的**：q=0 会让该样本被当成“无效观测”，hr=0 会被当成 0 bpm。
+ */
+void energy_sample_init(energy_sample_t *s);
 
 /* 一个 5 分钟输出点 */
 typedef struct {

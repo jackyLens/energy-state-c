@@ -121,6 +121,18 @@ static int tod_bin(double tod)
 /* ------------------------------------------------------------------ */
 /* 默认值（与 Python 先验一致）                                          */
 /* ------------------------------------------------------------------ */
+void energy_sample_init(energy_sample_t *s)
+{
+    if (!s) return;
+    memset(s, 0, sizeof(*s));
+    s->hr = NAN;
+    s->hrv_log = NAN;
+    s->q_hr = 1.0;
+    s->q_hrv = 1.0;
+    s->load = -1.0;
+    s->activity = -1.0;
+}
+
 void energy_params_default(energy_params_t *p)
 {
     if (!p) return;
@@ -894,16 +906,15 @@ static int ctx_step_internal(energy_ctx_t *ctx, const energy_sample_t *s_in, ene
     if (ctx->config_error) return ENERGY_EINVAL;
     energy_sample_t local = *s_in;
     sanitize_sample(&local);
-    const energy_sample_t *s = &local;
-    if (!isfinite(s->t_h) || fabs(s->t_h) > ENERGY_MAX_HOURS) return ENERGY_EINVAL;
+    if (!isfinite(local.t_h) || fabs(local.t_h) > ENERGY_MAX_HOURS) return ENERGY_EINVAL;
+
+    /* 本步覆盖的时长：首样本用 5 分钟，之后用实际间隔（缺数据时可能更长） */
+    double h = ENERGY_HOURS_PER_STEP;
     if (!ctx->started) {
-        ctx->t_h = s->t_h;
-        memcpy(ctx->prev_stage, s->stage, sizeof(ctx->prev_stage));
-        ctx->prev_load = sample_load(&ctx->cfg, s, ENERGY_HOURS_PER_STEP);
-        ctx->prev_stress = clampd(s->stress, 0.0, 1.0);
+        ctx->t_h = local.t_h;
         ctx->started = 1;
     } else {
-        const double h = s->t_h - ctx->t_h;
+        h = local.t_h - ctx->t_h;
         if (h <= 0.0) return ENERGY_EDOMAIN;
         if (ctx->cfg.use_ekf) {
             ctx_predict(ctx, h);
@@ -915,18 +926,25 @@ static int ctx_step_internal(energy_ctx_t *ctx, const energy_sample_t *s_in, ene
             ctx->s = s1;
             ctx->e = e1;
         }
-        ctx->t_h = s->t_h;
-        ctx->prev_load = sample_load(&ctx->cfg, s, ENERGY_HOURS_PER_STEP);
-        ctx->prev_stress = clampd(s->stress, 0.0, 1.0);
-        memcpy(ctx->prev_stage, s->stage, sizeof(ctx->prev_stage));
+        ctx->t_h = local.t_h;
     }
 
+    /* 先把“本样本生效的负荷/活动量”落回样本：
+     * load/activity 传 <0 表示由库计算，若只把它们算进输出而不写回样本，
+     * 观测方程会拿到 -1（活动量）或未归一化值，导致日间 HR/HRV 被错误解释。 */
+    local.load = sample_load(&ctx->cfg, &local, h);
+    local.activity = sample_activity(&ctx->cfg, &local);
+
+    ctx->prev_load = local.load;
+    ctx->prev_stress = clampd(local.stress, 0.0, 1.0);
+    memcpy(ctx->prev_stage, local.stage, sizeof(ctx->prev_stage));
+
     if (ctx->cfg.use_ekf) {
-        ctx_update(ctx, s, 0);
-        ctx_update(ctx, s, 1);
+        ctx_update(ctx, &local, 0);
+        ctx_update(ctx, &local, 1);
         ctx_clamp(ctx);
     }
-    ctx_emit(ctx, s, out);
+    ctx_emit(ctx, &local, out);
     return ENERGY_OK;
 }
 

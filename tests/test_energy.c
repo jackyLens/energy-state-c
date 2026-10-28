@@ -591,6 +591,40 @@ static void test_misc_api(void)
     free(s);
 }
 
+static void test_sample_init_and_auto_activity(void)
+{
+    /* 初始化：q 默认 1、hr/hrv 缺失、load/activity 交给库 */
+    energy_sample_t s0;
+    memset(&s0, 0xAA, sizeof(s0)); /* 脏内存 */
+    energy_sample_init(&s0);
+    CHECK(s0.q_hr == 1.0 && s0.q_hrv == 1.0);
+    CHECK(isnan(s0.hr) && isnan(s0.hrv_log));
+    CHECK(s0.load < 0.0 && s0.activity < 0.0);
+
+    /* 流式：activity=-1（自动）与显式给同一个值，必须逐点一致。
+     * 这曾经是个 bug：流式只把自动活动量写进输出，没写回观测方程。 */
+    size_t n = 0;
+    energy_sample_t *panel = make_panel(2, &n);
+    CHECK(panel != NULL);
+    energy_config_t cfg;
+    energy_config_default(&cfg);
+    energy_ctx_t a, b;
+    energy_ctx_init(&a, &cfg);
+    energy_ctx_init(&b, &cfg);
+    energy_point_t pa, pb;
+    for (size_t i = 0; i < n; i++) {
+        energy_sample_t sa = panel[i];
+        energy_sample_t sb = panel[i];
+        sa.activity = -1.0;
+        sb.activity = 0.8 * (panel[i].steps / 120.0);
+        CHECK(energy_ctx_step(&a, &sa, &pa) == ENERGY_OK);
+        CHECK(energy_ctx_step(&b, &sb, &pb) == ENERGY_OK);
+        CHECK_NEAR(pa.e, pb.e, 1e-12);
+        CHECK_NEAR(pa.energy, pb.energy, 1e-12);
+    }
+    free(panel);
+}
+
 static void test_config_validation(void)
 {
     energy_config_t cfg;
@@ -818,6 +852,7 @@ int main(void)
     test_golden_against_python();
     test_gate_with_gaussian_noise();
     test_gate_rejects_outlier();
+    test_sample_init_and_auto_activity();
     test_config_validation();
     test_degenerate_inputs();
     test_nan_fuzz();

@@ -7,7 +7,7 @@ Python 参考实现（ring_personal_agent 仓库的 `energy/`，energy-state v1.
 输入（5 分钟面板） → 负荷 L / 活动量 A → 解析 ODE 推进 → EKF 用 HR/HRV 校正 → 0–100 曲线 + 置信带 + 每日汇总
 ```
 
-与 Python 的数值一致性：**逐点最大偏差 1e-13**（21 天、6048 点，EKF 与开环两条路径都验证过）。
+v1.0.1（修复流式自动活动量未写回观测方程的 bug）。与 Python 的数值一致性：**逐点最大偏差 1e-13**（21 天、6048 点，EKF 与开环两条路径都验证过）。
 
 ---
 
@@ -163,23 +163,48 @@ printf("energy-state-c %s\n", energy_version());   /* "1.0.0" */
 ## 4. 输入
 
 ```c
-typedef struct {
-    double t_h;        /* 距起点小时，必须严格递增 */
-    double tod;        /* 当地钟点 0–24；<0 时按 t_h%24 推断 */
-    double stage[4];   /* wake/light/deep/rem 概率，和 ≤1；全 0 = 无分期 */
-    double hr;         /* bpm，缺失 NAN */
-    double hrv_log;    /* ln(RMSSD/ms)，缺失 NAN */
-    double steps;      /* 每 5 分钟步数，可选 */
-    double kcal;       /* 每 5 分钟热量，可选 */
-    double stress;     /* 0–1（传 0–100 会自动 /100） */
-    double q_hr;       /* 0–1，0 = 该点不参与更新 */
-    double q_hrv;
-    double load;       /* <0：内部算；>=0：直接用（[0,1]） */
-    double activity;   /* 同上 */
-} energy_sample_t;
+energy_sample_t s;
+energy_sample_init(&s);   /* 推荐：hr/hrv=NAN, q=1, load/activity=-1 */
+s.t_h = t; s.tod = tod;
+s.stage[...] = ...; s.hr = ...; s.hrv_log = ...;
+s.steps = ...; s.stress = ...;
 ```
 
+> **不要 `memset(s, 0, ...)`**：`q=0` 会被当成“无效观测”而跳过滤波，`hr=0` 会被当成 0 bpm。
+> 用 `energy_sample_init()`。
+
+| 字段 | 必须？ | 含义 | 不传/缺省时 |
+|---|---|---|---|
+| `t_h` | **必须** | 距起点小时，严格递增 | — |
+| `tod` | 可选 | 当地钟点 0–24 | `<0`/NaN → 由 `t_h%24` 推断 |
+| `stage[4]` | 建议 | wake/light/deep/rem 概率 | 全 0 = 无分期记录（**日间**） |
+| `hr` | 建议 | 心率 bpm | NaN = 该点无观测 |
+| `hrv_log` | 可选 | ln(RMSSD/ms) | NaN = 无观测 |
+| `steps`/`kcal` | 可选 | 每 5 分钟步数/热量 | 0 |
+| `stress` | 可选 | 0–1（传 0–100 自动 /100） | 0 |
+| `q_hr`/`q_hrv` | 可选 | 观测质量 0–1 | **1**（`energy_sample_init` 设好） |
+| `load` | 可选 | 归一化负荷 L∈[0,1]，进**状态方程** | `<0` → 由库计算 |
+| `activity` | 可选 | 活动量 A∈[0,1]，只进**日间观测方程** | `<0` → 由库计算 |
+
+**四个“可选”字段到底管什么：**
+
+- **`q_hr` / `q_hrv`（观测质量）**：只影响 EKF。`R = σ² / max(q, 0.05)`，q 越小越不信任这个点；
+  `q = 0` 直接跳过该通道（只预测、不更新）。设备给出质量位就透传（5 秒质量在 5 分钟窗口内取均值）；
+  没有质量信息就保持 1。NaN 视为 0。
+- **`load`（负荷 L）**：进状态方程的消耗项 `β = β₀ + β_L·L + β_P·stress + (1−m)·β_S·S`，
+  是白天掉电快慢的主因（实测 L=0 与 L=0.6 的日均能量差 14 分）。不传时由库用
+  `心率 TRIMP + 步数 + 心率超基线` 算，再按 P99.5 归一化；流式接口没有全局标定，
+  会用 `cfg.load` 里的 `hr_rest/hr_max/l_ref`（默认 60/185/0.25），
+  **生产环境应把 `l_ref` 固定成用户画像里的值**，否则不同窗口不可比。
+- **`activity`（活动量 A）**：只进**日间观测方程**（解释掉运动导致的心率升高），不直接改能量。
+  不传时按 `0.8·steps/120 + 0.2·kcal/6` 算。它与 `load` 分开是刻意的：
+  `load` 由心率算出，再拿它回归心率就是内生性（会把 `a_E` 从 −12 拉到 −38）。
+- 二者都传时，库不再计算；只传一个时，另一个仍会自动算。
+
 模型内部派生的三个量：`m=Σp_sleep`、`λ=Σp_s·κ_s`、`ψ=Σp_s·w_s`。
+
+> **stage 的约定**：是否有分期记录决定用夜间还是日间观测方程（`Σstage > 0.5` 即夜间）。
+> 白天请传全 0，**不要传 `wake=1`**——那会被当成“夜里清醒”，走夜间系数。
 
 ## 5. 输出
 
