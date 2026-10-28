@@ -1,0 +1,22 @@
+# C 库的 CI：编译（-Werror）+ 单测 + ASan/UBSan。
+# 说明：跨语言一致性（与 Python 对照）需要 pandas/numpy，放在本地 `make check`，不放进 CI。
+
+stages:
+  - build
+  - test
+
+build:
+  stage: build
+  image: gcc:13
+  script:
+    - make lib CFLAGS="-O2 -std=c99 -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror"
+  artifacts:
+    paths:
+      - build/libenergy.a
+
+test:
+  stage: test
+  image: gcc:13
+  script:
+    - make test
+    - make sanitize

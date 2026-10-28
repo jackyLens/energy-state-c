@@ -1,0 +1,8 @@
+build/
+*.gcov
+*.gcda
+*.gcno
+*.plist
+data/*.csv
+!data/sample_panel.csv
+data/c_stats.txt
