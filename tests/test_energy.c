@@ -625,6 +625,62 @@ static void test_sample_init_and_auto_activity(void)
     free(panel);
 }
 
+static void test_batch_honors_provided_load(void)
+{
+    /* 批量接口必须尊重调用方传入的 load/activity（>=0 直接用） */
+    size_t n = 0;
+    energy_sample_t *low = make_panel(1, &n);
+    energy_sample_t *high = make_panel(1, &n);
+    energy_sample_t *auto_panel = make_panel(1, &n);
+    CHECK(low && high && auto_panel);
+    for (size_t i = 0; i < n; i++) {
+        low[i].load = 0.05;
+        high[i].load = 0.95;
+        low[i].activity = 0.0;
+        high[i].activity = 0.0;
+        auto_panel[i].load = -1.0;
+        auto_panel[i].activity = -1.0;
+    }
+    energy_config_t cfg;
+    energy_config_default(&cfg);
+    energy_output_t ol, oh, oa;
+    CHECK(energy_compute(low, n, &cfg, &ol) == ENERGY_OK);
+    CHECK(energy_compute(high, n, &cfg, &oh) == ENERGY_OK);
+    CHECK(energy_compute(auto_panel, n, &cfg, &oa) == ENERGY_OK);
+
+    /* 传 0.05 与 0.95 必须得到不同的曲线，且低负荷能量更高 */
+    CHECK(ol.stats_mean > oh.stats_mean + 5.0);
+    CHECK_NEAR(ol.points[100].load, 0.05, 1e-12);
+    CHECK_NEAR(oh.points[100].load, 0.95, 1e-12);
+    CHECK(fabs(oa.stats_mean - oh.stats_mean) > 1e-9); /* 自动负荷与显式 0.95 不同 */
+
+    /* 显式 activity 也必须生效：只改 activity，日间观测不同 → 曲线不同 */
+    energy_sample_t *a0 = make_panel(1, &n);
+    energy_sample_t *a9 = make_panel(1, &n);
+    for (size_t i = 0; i < n; i++) {
+        a0[i].load = 0.3; a0[i].activity = 0.0;
+        a9[i].load = 0.3; a9[i].activity = 0.9;
+    }
+    energy_output_t o0, o9;
+    CHECK(energy_compute(a0, n, &cfg, &o0) == ENERGY_OK);
+    CHECK(energy_compute(a9, n, &cfg, &o9) == ENERGY_OK);
+    CHECK_NEAR(o0.points[100].activity, 0.0, 1e-12);
+    CHECK_NEAR(o9.points[100].activity, 0.9, 1e-12);
+    double maxdiff = 0.0;
+    for (size_t i = 0; i < n; i++) {
+        const double d = fabs(o0.points[i].e - o9.points[i].e);
+        if (d > maxdiff) maxdiff = d;
+    }
+    CHECK(maxdiff > 1e-3);
+
+    energy_output_free(&ol);
+    energy_output_free(&oh);
+    energy_output_free(&oa);
+    energy_output_free(&o0);
+    energy_output_free(&o9);
+    free(low); free(high); free(auto_panel); free(a0); free(a9);
+}
+
 static void test_hrv_conversion(void)
 {
     /* 毫秒 → ln(ms)：必须是自然对数，且拒绝非正/非有限 */
@@ -886,6 +942,7 @@ int main(void)
     test_gate_with_gaussian_noise();
     test_gate_rejects_outlier();
     test_sample_init_and_auto_activity();
+    test_batch_honors_provided_load();
     test_hrv_conversion();
     test_config_validation();
     test_degenerate_inputs();

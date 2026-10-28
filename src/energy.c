@@ -1040,8 +1040,15 @@ static int compute_loads(const energy_sample_t *samples, size_t n,
         return rc;
     }
     for (size_t i = 0; i < n; i++) {
-        load[i] = clampd(raw[i] / l_ref, 0.0, 1.0);
-        activity[i] = energy_activity_step(samples[i].steps, samples[i].kcal, cfg->steps_ref);
+        /* 调用方给了就优先用（>=0），否则用库算的归一化负荷 */
+        const double given_load = samples[i].load;
+        load[i] = (isfinite(given_load) && given_load >= 0.0)
+                      ? clampd(given_load, 0.0, 1.0)
+                      : clampd(raw[i] / l_ref, 0.0, 1.0);
+        const double given_act = samples[i].activity;
+        activity[i] = (isfinite(given_act) && given_act >= 0.0)
+                          ? clampd(given_act, 0.0, 1.0)
+                          : energy_activity_step(samples[i].steps, samples[i].kcal, cfg->steps_ref);
     }
     free(raw);
     return ENERGY_OK;
