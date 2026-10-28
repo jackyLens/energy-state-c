@@ -121,6 +121,12 @@ static int tod_bin(double tod)
 /* ------------------------------------------------------------------ */
 /* 默认值（与 Python 先验一致）                                          */
 /* ------------------------------------------------------------------ */
+double energy_hrv_log_from_ms(double rmssd_ms)
+{
+    if (!isfinite(rmssd_ms) || rmssd_ms <= 0.0) return (double)NAN;
+    return log(rmssd_ms);
+}
+
 void energy_sample_init(energy_sample_t *s)
 {
     if (!s) return;

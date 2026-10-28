@@ -625,6 +625,39 @@ static void test_sample_init_and_auto_activity(void)
     free(panel);
 }
 
+static void test_hrv_conversion(void)
+{
+    /* 毫秒 → ln(ms)：必须是自然对数，且拒绝非正/非有限 */
+    CHECK_NEAR(energy_hrv_log_from_ms(45.0), log(45.0), 1e-12);
+    CHECK_NEAR(energy_hrv_log_from_ms(1.0), 0.0, 1e-12);
+    CHECK(isnan(energy_hrv_log_from_ms(0.0)));
+    CHECK(isnan(energy_hrv_log_from_ms(-3.0)));
+    CHECK(isnan(energy_hrv_log_from_ms(NAN)));
+    /* 与直接取对数等价，且落在观测模型的合理区间内 */
+    const double v = energy_hrv_log_from_ms(60.0);
+    CHECK(v > 3.0 && v < 4.5);
+
+    /* 端到端：用转换函数填 hrv_log，应当与显式 log() 完全一致 */
+    size_t n = 0;
+    energy_sample_t *a = make_panel(1, &n);
+    energy_sample_t *b = make_panel(1, &n);
+    for (size_t i = 0; i < n; i++) {
+        const double ms = exp(a[i].hrv_log);
+        a[i].hrv_log = energy_hrv_log_from_ms(ms);
+        b[i].hrv_log = log(ms);
+    }
+    energy_config_t cfg;
+    energy_config_default(&cfg);
+    energy_output_t oa, ob;
+    CHECK(energy_compute(a, n, &cfg, &oa) == ENERGY_OK);
+    CHECK(energy_compute(b, n, &cfg, &ob) == ENERGY_OK);
+    for (size_t i = 0; i < n; i++) CHECK_NEAR(oa.points[i].e, ob.points[i].e, 1e-15);
+    energy_output_free(&oa);
+    energy_output_free(&ob);
+    free(a);
+    free(b);
+}
+
 static void test_config_validation(void)
 {
     energy_config_t cfg;
@@ -853,6 +886,7 @@ int main(void)
     test_gate_with_gaussian_noise();
     test_gate_rejects_outlier();
     test_sample_init_and_auto_activity();
+    test_hrv_conversion();
     test_config_validation();
     test_degenerate_inputs();
     test_nan_fuzz();

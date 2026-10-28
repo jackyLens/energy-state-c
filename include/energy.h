@@ -40,7 +40,7 @@
  *   stage[4]       睡眠分期；缺省 m=0 → 夜间不充电（实测 07:00 的 E 从 0.71 掉到 0.37）
  *   hr             心率；缺省 → 退化为开环，只有模型先验，置信带宽度为 0
  * 强烈建议：
- *   hrv_log/hrv_ms 夜间第二观测通道
+ *   hrv_log        HRV 观测（ln(RMSSD/ms)，每样本一个标量）；夜间最重要，日间可选
  *   steps_5m       负荷 L 与活动量 A 的主要来源（也可直接给 load/activity）
  *   stress         压力消耗项（满量程约 3×β0）
  *   tod            起点不是 00:00 时必须给；否则按 t_h%24 推断会错位
@@ -79,7 +79,7 @@
 extern "C" {
 #endif
 
-#define ENERGY_VERSION "1.0.1"
+#define ENERGY_VERSION "1.1.0"
 
 /* 运行期版本字符串（用于日志/上报）。 */
 const char *energy_version(void);
@@ -197,7 +197,9 @@ typedef struct {
                       * 约定：全 0 = 无分期记录（日间）；和 >0.5 = 有记录（夜间观测方程）。
                       * 白天请传全 0，不要传 wake=1——否则会走夜间观测方程。 */
     double hr;       /* bpm，缺失 NAN */
-    double hrv_log;  /* ln(RMSSD/ms)，缺失 NAN */
+    double hrv_log;  /* ln(RMSSD/ms)，标量，每 5 分钟一个；缺失 NAN。
+                      * 注意是“对数”，不是毫秒：45 ms → ln(45)=3.81。
+                      * 设备给毫秒时用 energy_hrv_log_from_ms() 转换。 */
     double steps;    /* 每 5 分钟步数，可选（算负荷/活动量用） */
     double kcal;     /* 每 5 分钟热量，可选 */
     double stress;   /* 0–1；若传 0–100 会被 /100 */
@@ -206,6 +208,10 @@ typedef struct {
     double load;     /* 归一化负荷 L∈[0,1]，进状态方程；<0 = 由库计算 */
     double activity; /* 活动量 A∈[0,1]，只进日间观测方程；<0 = 由库计算 */
 } energy_sample_t;
+
+/* RMSSD(ms) → ln(RMSSD/ms)。<=0 或非有限返回 NAN（与“缺失观测”语义一致）。
+ * C 端只有 hrv_log 一个字段，没有 hrv_ms；这是唯一需要的换算。 */
+double energy_hrv_log_from_ms(double rmssd_ms);
 
 /*
  * 把样本初始化成“全缺失、质量正常、负荷/活动量交给库算”的默认状态：
