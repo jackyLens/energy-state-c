@@ -930,13 +930,16 @@ static void ctx_update(energy_ctx_t *ctx, const energy_sample_t *s, int channel)
         r_scale = cold_r_scale(bc, ctx->bl.n[k]);
     }
 
+    /* residual against the personal observation model (prior E): consumed by vitality.h */
+    const double pred = level + reg;
+    ctx->resid[channel] = y - pred;
+
     if (!cfg->day_update && !night) {
         /* Python: skip_update = (not day_update) and panel.is_day[k] */
         if (s->tod >= 7.0 && s->tod < 22.0) return;
     }
 
     /* H = [0, slope]: the observation depends on E only */
-    const double pred = level + reg;
     const double R = (sigma * sigma) / fmax(q, cfg->ekf.q_floor) * r_scale;
     const double PHt0 = ctx->p01 * slope;
     const double PHt1 = ctx->p11 * slope;
@@ -1040,6 +1043,7 @@ void energy_ctx_init(energy_ctx_t *ctx, const energy_config_t *cfg)
     ctx->bl = ctx->cfg.baseline.init; /* the profile's baseline, if any */
     ctx->stress_div = 1.0;
     ctx->lc_last_hr = (double)NAN;
+    ctx->resid[0] = ctx->resid[1] = (double)NAN;
 }
 
 void energy_ctx_get_baseline(const energy_ctx_t *ctx, energy_baseline_t *out)
@@ -1434,6 +1438,8 @@ static void ctx_emit(const energy_ctx_t *ctx, const energy_sample_t *s, double l
     out->activity = activity;
     out->sleep_prob = mix.sleep_prob;
     out->flags = flags;
+    out->hr_resid = ctx->resid[0];
+    out->hrv_resid = ctx->resid[1];
 }
 
 /* Field clean-up. Stress must already be scaled to 0-1 by the caller (energy_ctx_step /
@@ -1484,6 +1490,7 @@ static int ctx_step_internal(energy_ctx_t *ctx, const energy_sample_t *s_in, ene
     }
     ctx->t_h = local.t_h;
     ctx->tod = local.tod;
+    ctx->resid[0] = ctx->resid[1] = (double)NAN;
 
     double load = 0.0, activity = 0.0;
     if (has_data) {
@@ -1546,6 +1553,7 @@ void energy_ctx_peek(const energy_ctx_t *ctx, double tod, energy_point_t *out)
     out->s = ctx->s;
     out->e = ctx->e;
     out->e_sd = ctx->cfg.use_ekf ? sqrt(fmax(ctx->p11, 0.0)) : 0.0;
+    out->hr_resid = out->hrv_resid = (double)NAN;
     point_band(&ctx->cfg.display, ctx->e, out->e_sd, tod, out);
     if (ctx->cfg.baseline.enable && ctx->bl.n[ENERGY_BL_HR_NIGHT] < ctx->cfg.baseline.cold_nights) {
         out->flags = ENERGY_FLAG_LEARNING;

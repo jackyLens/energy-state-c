@@ -371,6 +371,10 @@ typedef struct {
     double base;      /* 100×E（不含节律/平滑） */
     double load, activity, sleep_prob;
     unsigned flags;   /* ENERGY_FLAG_* */
+    /* 观测残差（观测值 − 个体化观测模型在校正前的预测），单位 bpm / ln(RMSSD)。
+     * 该点没有观测、质量为 0、或个体基线尚未建立时为 NAN。能量模型已经解释了 E、分期、
+     * 活动量和节律项，剩下的是“未被能量解释的快变化”——这是精力层（vitality.h）的输入。 */
+    double hr_resid, hrv_resid;
 } energy_point_t;
 
 /* 每日汇总（按当地日历日切分：以首个样本的钟点 tod 对齐午夜） */
@@ -454,6 +458,7 @@ typedef struct {
     int gate_rej[4];          /* 各通道连续被门控拒绝次数 */
     int anomaly_run[4];       /* 各通道连续同向异常段计数（带符号；|n|>=3 视为常态变化） */
     unsigned long n_obs, n_gated; /* 遥测：参与门控判断的观测数 / 被拒绝数 */
+    double resid[2];          /* 本步 HR/HRV 残差（供输出点与精力层使用），无则 NAN */
 
     /* 流式在线负荷标定（只在样本未给 load 且画像缺项时使用） */
     double lc_deep, lc_sleep, lc_all; /* 深睡心率中位数 / 睡眠心率 P20 / 全部心率 P5（在线分位跟踪） */
