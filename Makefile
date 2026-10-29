@@ -45,7 +45,7 @@ $(BUILD)/test_vitality: $(VTEST_SRC) $(BUILD)/libenergy.a include/energy.h inclu
 $(BUILD)/vitality_demo: examples/vitality_demo.c $(BUILD)/libenergy.a include/energy.h include/vitality.h
 	$(CC) $(CFLAGS) $(INC) $< $(BUILD)/libenergy.a -lm -o $@
 
-$(BUILD)/bench_energy: tests/bench_energy.c $(BUILD)/libenergy.a include/energy.h
+$(BUILD)/bench_energy: tests/bench_energy.c $(BUILD)/libenergy.a include/energy.h include/vitality.h
 	$(CC) $(CFLAGS) $(INC) $< $(BUILD)/libenergy.a -lm -o $@
 
 $(BUILD)/stream_demo: examples/stream_demo.c $(BUILD)/libenergy.a include/energy.h

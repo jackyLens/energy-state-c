@@ -52,7 +52,8 @@
  * 保证与限制
  * ----------
  *   - V、V*、D 有界；无随机性；无全局状态；逐位可复现；
- *   - 单步计算 < 100 次浮点运算，vitality_ctx_t 约 3 KB（含 energy_ctx_t，以 sizeof 为准）；
+ *   - 单步常数开销（无随历史增长的循环；make bench：桌面 x86-64 -O2 下精力层增量约 4 µs/步）；
+ *     vitality_ctx_t 在 x86-64 上 3736 B（含 energy_ctx_t 2344 B，以 sizeof 为准）；
  *   - 事件检测只依据生理效应（负荷、活动量、残差），不识别原因；咖啡只能通过心率间接体现；
  *   - 夜间（主睡眠）不做观测更新，V 跟随均衡线并带 VITALITY_FLAG_SLEEP；
  *   - 个人常态（夜间回充量、睡眠结构、HRV）至少 1 晚后才用于晨起初始化，3 晚内带 LEARNING 标志；
@@ -79,7 +80,7 @@ typedef struct {
     double lambda;      /* 能量低时回归变慢的放大系数，1.5 */
     double d_cap;       /* 正向偏离上限系数：D ≤ d_cap·E，0.30 */
     double q_d;         /* 过程噪声（每小时方差），0.02：与 τ_D 匹配，稳态 P≈q_d·τ/2，使 +10 bpm 持续 30 min 约抬 D 0.05–0.08 */
-    double p0;          /* 初始 / 晨起方差，0.04 */
+    double p0;          /* 初始 / 晨起方差，0.01（D_init 的先验标准差 0.1，与 |D_init| ≤ 0.2 匹配） */
 } vitality_dyn_t;
 
 /* 观测模型：y_hr = a_hr·D + ε，y_hrv = a_hrv·D + ε；y 是 z 化残差经变换后的量 */

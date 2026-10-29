@@ -19,12 +19,40 @@ Python 参考实现（ring_personal_agent 仓库的 `energy/`，energy-state v1.
 |---|---|---|
 | [产品说明](docs/product.html) · [PDF](docs/product.pdf) | 产品 / 设计 / 运营 | 曲线怎么读、三层价值链、三种用法、刻度语义、能说/不能说、FAQ（3 张图） |
 | [技术说明](docs/technical.html) · [PDF](docs/technical.pdf) | 算法 / 后端 / 客户端 | 输入→输出数据流、能量收支、观测与 EKF、流式时序、状态机、性能与验证（4 张图） |
+| [精力 · 产品说明](docs/vitality_product.html) · [PDF](docs/vitality_product.pdf) | 产品 / 设计 / 运营 | 能量与精力并排怎么读、四象限文案、两种 0–100 刻度、手动标记、能说/不能说（4 张图） |
+| [精力 · 技术说明](docs/vitality_technical.html) · [PDF](docs/vitality_technical.pdf) | 算法 / 后端 / 客户端 | 级联结构、一步流水线、倒 U 观测、事件、晨起初始化、接口、验证与边界（5 张图） |
+| [精力 · 算法设计](docs/vitality_design.md) | 算法 | 模型推导、Mermaid 流程图、参数表、测试矩阵、决策日志 |
 
 HTML 是自包含的（内联 SVG，无外部依赖），双击即可在浏览器打开；PDF 由同一份 HTML 打印生成，方便在 GitLab 内预览。重新生成：
 
 ```bash
 make docs          # 需要 Chrome / Chromium
+python3 scripts/gen_vitality_docs.py build/vitality_demo.csv   # 精力两份 HTML（先 make example 生成 CSV）
 ```
+
+## 精力层（vitality，v1.0.0）
+
+能量 E 回答"储备还剩多少"，精力 V 回答"此刻用得出来多少"。精力层级联在能量层之上（`include/vitality.h`、`src/vitality.c`），
+不改能量层的状态：取能量层输出的心率 / HRV 观测残差（`energy_point_t.hr_resid / hrv_resid`，v1.2 新增字段），
+经 z 化与倒 U 变换后作为标量卡尔曼观测，估计一个会自行消退的偏离量 D；精力 `V = clip(V* + D, 0, 1)`，
+均衡线 `V* = E·(1 + ρ·c(t))` 复用能量层的昼夜节律。
+
+- **只跟自己比**：所有残差相对本人基线；`percentile` 是本人过去 28 天的经验分位，库内没有任何跨人统计。
+- **事件**：午睡、运动后回弹（用活动量而非负荷做门控）、持续偏高心率的"过载"、短暂偏高的"轻度唤醒"自动识别；咖啡 / 冥想 / 压力只接受用户标记（`vitality_ctx_event`）。
+- **晨起初始化 D_init**：由本夜 ΔE、醒前 HRV、睡眠结构相对本人常态的偏差给出；常态未建立时为 0（"不知道就不猜"）；夜里醒来 2 小时内续睡会并回同一夜。
+- **输出**：`vitality`（0–100 绝对自我刻度）、`percentile`、`score`（按 `score_mode` 选）、95% 带、四象限 `quadrant` 与 `flags`。
+
+```c
+vitality_ctx_t vc;  vitality_ctx_init(&vc, &ecfg, NULL);
+for (each 5-min sample) {
+    energy_point_t ep; vitality_point_t vp;
+    vitality_ctx_step(&vc, &sample, &ep, &vp);     /* 内部自带 energy_ctx_t */
+}
+/* 批量：vitality_compute(&ecfg, NULL, samples, n, &out)；CLI：energy_cli panel.csv --vitality */
+```
+
+测试 `make test` 另有 **27,445** 个精力断言（0 失败）；`make bench` 中能量+精力流式一步约 8.7 µs（x86-64 容器，仅作量级参考）。
+精力层的全部数字同样来自合成数据，**未在真实用户数据上验证**；需要真实数据决定的问题列在 `docs/vitality_design.md` 末尾。
 
 ## 0. 能量值该不该做成 static，每 5 分钟 `+=` 一下？
 

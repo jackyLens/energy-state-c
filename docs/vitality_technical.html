@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>energy-state-c 技术说明 · 精力层</title>
+<style>
+  :root{
+    --paper:#faf7f2; --paper-2:#f2ece1; --ink:#23252f; --muted:#5b6070; --soft:#71768a;
+    --rule:rgba(35,37,47,.14); --rule-2:rgba(35,37,47,.07);
+    --indigo:#3f5bd9; --indigo-t:#eef1ff;
+    --violet:#6d4fc4; --violet-t:#f2eeff;
+    --amber:#a8650f;  --amber-t:#fbf1e2;
+    --teal:#0e7a83;   --teal-t:#e6f4f5;
+    --rose:#a83f63;   --rose-t:#fbe9ef;
+    --green:#2c7a4b;  --green-t:#e8f4ec;
+    --accent:#bf4520; --accent-t:#fdeee8;
+    --sans:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+    --serif:"Songti SC","Noto Serif SC","Source Han Serif SC",Georgia,"Times New Roman",serif;
+    --mono:"SF Mono",ui-monospace,Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15.5px;line-height:1.72;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding:56px 40px 96px}
+  a{color:var(--teal);text-decoration:none;border-bottom:1px solid rgba(14,122,131,.25)}
+  a:hover{border-bottom-color:var(--teal)}
+
+  /* header */
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
+  h1{font-family:var(--serif);font-weight:400;font-size:clamp(34px,4vw,52px);line-height:1.18;letter-spacing:-.01em;margin:14px 0 16px}
+  .lede{font-size:17px;color:var(--muted);max-width:64ch}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
+  .chip{font-family:var(--mono);font-size:11px;padding:5px 10px;border:1px solid var(--rule);border-radius:4px;color:var(--muted);background:#fff}
+  .chip b{color:var(--ink);font-weight:600}
+
+  /* toc */
+  .toc{display:flex;flex-wrap:wrap;gap:6px 18px;margin:34px 0 8px;padding:14px 0;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);font-size:13px}
+  .toc span{color:var(--soft);font-family:var(--mono);font-size:10px;letter-spacing:.12em;margin-right:4px}
+  .toc a{border:none;color:var(--muted)}
+  .toc a:hover{color:var(--teal)}
+
+  /* sections */
+  section{margin-top:64px}
+  .sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:8px}
+  .sec-no{font-family:var(--mono);font-size:11px;letter-spacing:.16em;color:var(--soft)}
+  h2{font-family:var(--serif);font-weight:400;font-size:30px;letter-spacing:-.01em}
+  h3{font-size:17px;font-weight:600;margin:30px 0 10px}
+  p{margin:10px 0;color:#2e3140}
+  .small{font-size:13.5px;color:var(--muted)}
+  .rule{height:2px;width:56px;margin:10px 0 22px;background:var(--accent);border-radius:2px}
+
+  /* figure */
+  figure{margin:26px 0 34px;break-inside:avoid}
+  .fig-head{display:flex;align-items:baseline;gap:10px;margin-bottom:10px}
+  .fig-no{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:#fff;background:var(--ink);padding:3px 7px;border-radius:3px}
+  .fig-title{font-size:14px;font-weight:600;color:var(--ink)}
+  .diagram-container{overflow-x:auto;border:1px solid var(--rule);border-radius:8px;background:#fff}
+  svg{display:block;width:100%;min-width:1000px;height:auto}
+  figcaption{font-size:13px;color:var(--muted);margin-top:10px;padding-left:2px}
+
+  /* notes */
+  .note{border-left:3px solid var(--teal);background:var(--teal-t);padding:14px 18px;border-radius:0 6px 6px 0;margin:20px 0;font-size:14px}
+  .note.warn{border-left-color:var(--amber);background:var(--amber-t)}
+  .note.hot{border-left-color:var(--accent);background:var(--accent-t)}
+  .note b{font-weight:600}
+
+  /* tables */
+  table{width:100%;border-collapse:collapse;margin:18px 0 8px;font-size:13.5px;background:#fff;border:1px solid var(--rule);border-radius:8px;overflow:hidden}
+  th{text-align:left;font-weight:600;font-size:12px;letter-spacing:.04em;color:var(--muted);background:var(--paper-2);padding:10px 12px;border-bottom:1px solid var(--rule)}
+  td{padding:10px 12px;border-bottom:1px solid var(--rule-2);vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  td code,th code{font-family:var(--mono);font-size:12px;background:var(--paper-2);padding:1px 5px;border-radius:3px}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;vertical-align:1px}
+
+  /* code */
+  pre{font-family:var(--mono);font-size:12.5px;line-height:1.6;background:#22242e;color:#f2efe9;padding:16px 18px;border-radius:8px;overflow-x:auto;margin:16px 0}
+  pre .c{color:#9aa0b5}
+  pre .k{color:#f0a878}
+  pre .s{color:#9fd6a8}
+  code.inl{font-family:var(--mono);font-size:12.5px;background:var(--paper-2);padding:1px 5px;border-radius:3px}
+
+  /* stats */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:22px 0}
+  .stat{background:#fff;border:1px solid var(--rule);border-radius:8px;padding:14px 16px}
+  .stat .n{font-family:var(--serif);font-size:28px;line-height:1.1}
+  .stat .l{font-size:12px;color:var(--muted);margin-top:4px}
+  .stat.i .n{color:var(--indigo)} .stat.t .n{color:var(--teal)} .stat.g .n{color:var(--green)} .stat.a .n{color:var(--amber)}
+
+  /* two-col */
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:18px 0}
+  .card{background:#fff;border:1px solid var(--rule);border-radius:8px;padding:16px 18px}
+  .card h4{font-size:14px;margin-bottom:6px;display:flex;align-items:center;gap:8px}
+  .card ul{margin:8px 0 0 18px;font-size:13.5px;color:var(--muted)}
+  .card li{margin:4px 0}
+
+  footer{margin-top:80px;padding-top:22px;border-top:1px solid var(--rule);font-size:12.5px;color:var(--soft);display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
+
+  @media (max-width:820px){
+    .wrap{padding:32px 20px 64px}
+    .stats{grid-template-columns:repeat(2,1fr)}
+    .cols{grid-template-columns:1fr}
+    svg{min-width:0}
+    .diagram-container{overflow-x:auto}
+  }
+  .cover{display:none}
+  @media print{
+    .cover{display:block;margin-top:26px;padding-top:18px;border-top:1px solid var(--rule)}
+    .cover h3{font-family:var(--serif);font-weight:400;font-size:20px;margin:0 0 8px}
+    .cover p{font-size:12.5px;color:var(--muted);margin:4px 0}
+    .cover-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:16px 0 20px}
+    .cover-cell{border:1px solid var(--rule);border-radius:6px;padding:10px 12px}
+    .cover-cell .n{font-family:var(--serif);font-size:24px;line-height:1.1}
+    .cover-cell .l{font-size:10.5px;color:var(--muted);margin-top:2px}
+    .cover-toc{columns:2;column-gap:28px;margin:6px 0 0 18px;font-size:11.5px;color:var(--muted)}
+    .cover-toc li{margin:3px 0;break-inside:avoid}
+    #flow,#what{break-before:page}
+  }
+  @media print{
+    @page{ size:A4; margin:11mm 12mm; }
+    body{background:#fff;font-size:12.6px;line-height:1.62}
+    .wrap{padding:0;max-width:none}
+    h1{font-size:32px;margin:4px 0 8px}
+    .lede{font-size:13.5px;max-width:none}
+    .meta{margin-top:10px}
+    .toc{display:none}
+    section{margin-top:24px}
+    .sec-head{margin-bottom:2px}
+    h2{font-size:23px}
+    .rule{margin:6px 0 12px}
+    figure{margin:10px 0 18px}
+    .diagram-container{zoom:.8;border-color:#e5e0d6;overflow:visible}
+    svg{min-width:0}
+    .stats{margin:10px 0}
+    .card{padding:10px 12px}
+    table{font-size:11.5px}
+    th,td{padding:6px 8px}
+    pre{font-size:10px;padding:10px 12px}
+    footer{margin-top:24px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">energy-state-c · technical note · vitality v1.0.0</div>
+    <h1>在能量之上，再算一条精力</h1>
+    <p class="lede">能量回答“储备还剩多少”，精力回答“此刻用得出来多少”。精力层把能量层解释不了的心率 / HRV 残差、运动与小睡的回弹、睡眠质量相对本人常态的偏差，建模成一个会自己消退的偏离量 D，叠加在“能量 × 昼夜节律”的均衡线上。</p>
+    <div class="meta"><span class="chip"><b>C99</b> + libm</span><span class="chip">级联于 energy.c</span><span class="chip"><b>1</b> 个标量隐状态</span><span class="chip">批量 <b>+</b> 流式</span></div>
+  </header>
+
+  <div class="cover">
+    <h3>这份文档回答四个问题</h3>
+    <p>为什么能量之外还要一个精力？它怎么从能量层的残差算出来？怎么接入？凭什么相信这些数字？</p>
+    <div class="cover-grid">
+      <div class="cover-cell"><div class="n" style="color:#0e7a83">1</div><div class="l">个新增隐状态 D</div></div>
+      <div class="cover-cell"><div class="n" style="color:#bf4520">0</div><div class="l">处能量层改动（只加两列输出）</div></div>
+      <div class="cover-cell"><div class="n" style="color:#2c7a4b">27,445</div><div class="l">精力层测试断言</div></div>
+      <div class="cover-cell"><div class="n" style="color:#a8650f">4.14 µs</div><div class="l">每步增量开销</div></div>
+    </div>
+  </div>
+
+  <nav class="toc"><span>CONTENTS</span><a href="#why">1 为什么</a><a href="#arch">2 级联结构</a><a href="#step">3 一步之内</a><a href="#obs">4 观测</a><a href="#events">5 事件</a><a href="#morning">6 晨起初始化</a><a href="#scale">7 刻度</a><a href="#api">8 接口</a><a href="#verify">9 验证</a><a href="#limits">10 边界</a></nav>
+
+  <section id="why">
+    <div class="sec-head"><span class="sec-no">01</span><h2>为什么要第二个状态量</h2></div>
+    <div class="rule"></div>
+
+    <p>能量 E 是慢变量：它回答"储备还剩多少"，由夜间恢复和日间消耗决定，一杯咖啡或一次午睡不会改变储备。但用户此刻的主观状态会变。精力层把这类<b>短时的、会自己消退的</b>偏离单独建模为 D，叠加在"能量 × 昼夜节律"的均衡线上：</p>
+    <pre>V(t)  = clip( V*(t) + D(t), 0, 1 )
+V*(t) = E(t) · [ 1 + ρ · c(t) ]                       <span class="c">ρ = 0.15，c(t) 复用能量层的节律形状</span>
+dD/dt = − D / τ_D(E) + Σ 事件脉冲 + 观测修正          <span class="c">τ_D = 0.75 h · (1 + 1.5 · (1 − E))</span></pre>
+    <table>
+      <thead><tr><th>现象</th><th>能量 E</th><th>精力 V</th></tr></thead>
+      <tbody>
+        <tr><td>下午咖啡，心率略升</td><td>继续下降</td><td>短暂上浮后约 1 h 内衰回</td></tr>
+        <tr><td>20 min 午睡</td><td>略升</td><td>立即回弹（示例 55.6 → 68.6）</td></tr>
+        <tr><td>1 h 会议，心率 +22 bpm 未动</td><td>消耗加快，滞后</td><td>过载，下压</td></tr>
+        <tr><td>比平时睡得好 / 差</td><td>晨起 E 高 / 低</td><td>醒来高于 / 低于均衡线（D_init）</td></tr>
+      </tbody>
+    </table>
+    <div class="note"><b>没有观测时它退化为均衡线。</b>D 的开环解是指数衰减，没有事件、没有残差时 |D| 单调不增（测试 <code class="inl">test_open_loop</code>），因此精力层不会"无中生有"。</div>
+
+  </section>
+
+  <section id="arch">
+    <div class="sec-head"><span class="sec-no">02</span><h2>级联结构：能量层不变，精力层只吃它的输出</h2></div>
+    <div class="rule"></div>
+
+    <p>D 没有并入能量层的状态向量。能量层已经在学个人基线，如果再加一维 D，"心率高是基线偏了还是 D 高"不可辨识。级联后能量层代码不变，只新增两列输出：观测更新前的 HR / HRV 残差 <code class="inl">hr_resid / hrv_resid</code>——能量层解释不了的部分，正是精力层要解释的部分。</p>
+
+    <figure>
+      <div class="fig-head"><span class="fig-no">FIG 1</span><span class="fig-title">级联：能量层 → 残差 → 精力层</span></div>
+      <div class="diagram-container"><svg viewBox="0 0 920 360" role="img" aria-label="级联结构：能量层不变，精力层只消费它的输出与残差" font-family="'PingFang SC','Microsoft YaHei','Noto Sans SC',sans-serif"><title>级联结构：能量层不变，精力层只消费它的输出与残差</title><desc>样本进入能量层得到 E 与观测残差；精力层按预测、晨起初始化、观测更新、裁剪输出四步计算 V。</desc><defs><marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#7a7f8c"/></marker><marker id="arr-acc" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker></defs><rect width="920" height="360" fill="#ffffff"/><rect x="30" y="40" width="150" height="120" rx="6" fill="#eef1ff" stroke="#3f5bd9"/>
+<text x="42" y="60" font-size="13" font-weight="600" fill="#23252f">每 5 分钟样本</text>
+<text x="42" y="78" font-size="11.5" fill="#5b6070">心率 / HRV</text>
+<text x="42" y="93" font-size="11.5" fill="#5b6070">步数 / 分期</text>
+<text x="42" y="108" font-size="11.5" fill="#5b6070">质量 / 压力</text>
+<rect x="220" y="20" width="300" height="290" rx="8" fill="none" stroke="#bf4520" stroke-dasharray="4,3"/>
+<text x="232" y="40" font-size="11" fill="#bf4520" letter-spacing=".12em">能量层 energy.c v1.2.0（不改）</text>
+<rect x="240" y="56" width="260" height="60" rx="6" fill="#fdeee8" stroke="#bf4520"/>
+<text x="252" y="76" font-size="13" font-weight="600" fill="#23252f">状态方程 S / E</text>
+<text x="252" y="94" font-size="11.5" fill="#5b6070">解析解推进，睡眠恢复、日间消耗</text>
+<rect x="240" y="132" width="260" height="60" rx="6" fill="#fbe9ef" stroke="#a83f63"/>
+<text x="252" y="152" font-size="13" font-weight="600" fill="#23252f">个体化观测模型 + EKF</text>
+<text x="252" y="170" font-size="11.5" fill="#5b6070">预测 HR / HRV，用残差校正 E</text>
+<rect x="240" y="208" width="120" height="84" rx="6" fill="#fbe9ef" stroke="#a83f63"/>
+<text x="252" y="228" font-size="13" font-weight="600" fill="#23252f">输出 (v1.2 新增)</text>
+<text x="252" y="246" font-size="11.5" fill="#5b6070">hr_resid</text>
+<text x="252" y="261" font-size="11.5" fill="#5b6070">hrv_resid</text>
+<rect x="380" y="208" width="120" height="84" rx="6" fill="#fdeee8" stroke="#bf4520"/>
+<text x="392" y="228" font-size="13" font-weight="600" fill="#23252f">输出</text>
+<text x="392" y="246" font-size="11.5" fill="#5b6070">E, sleep_prob</text>
+<text x="392" y="261" font-size="11.5" fill="#5b6070">load, activity</text>
+<rect x="560" y="20" width="330" height="290" rx="8" fill="none" stroke="#0e7a83" stroke-dasharray="4,3"/>
+<text x="572" y="40" font-size="11" fill="#0e7a83" letter-spacing=".12em">精力层 vitality.c v1.0.0</text>
+<rect x="580" y="56" width="290" height="52" rx="6" fill="#e6f4f5" stroke="#0e7a83"/>
+<text x="592" y="76" font-size="13" font-weight="600" fill="#23252f">① 预测  D ← e^(−h/τ_D)·D</text>
+<text x="592" y="94" font-size="11.5" fill="#5b6070">τ_D = 0.75 h·(1+1.5(1−E))</text>
+<rect x="580" y="118" width="290" height="52" rx="6" fill="#e6f4f5" stroke="#0e7a83"/>
+<text x="592" y="138" font-size="13" font-weight="600" fill="#23252f">② 睡眠段 / 晨起初始化</text>
+<text x="592" y="156" font-size="11.5" fill="#5b6070">D ← D_init（相对本人常态）</text>
+<rect x="580" y="180" width="290" height="52" rx="6" fill="#e6f4f5" stroke="#0e7a83"/>
+<text x="592" y="200" font-size="13" font-weight="600" fill="#23252f">③④ 残差 z 化 → 事件 → 标量 KF</text>
+<text x="592" y="218" font-size="11.5" fill="#5b6070">倒 U 变换；运动 / 小睡 / 拖拽</text>
+<rect x="580" y="242" width="290" height="52" rx="6" fill="#e8f4ec" stroke="#2c7a4b"/>
+<text x="592" y="262" font-size="13" font-weight="600" fill="#23252f">⑤⑥ 裁剪 → 分位 → 输出</text>
+<text x="592" y="280" font-size="11.5" fill="#5b6070">V = clip(V* + D)，percentile</text>
+<rect x="30" y="220" width="150" height="70" rx="6" fill="#f2eeff" stroke="#6d4fc4"/>
+<text x="42" y="240" font-size="13" font-weight="600" fill="#23252f">用户标记（可选）</text>
+<text x="42" y="258" font-size="11.5" fill="#5b6070">咖啡 / 冥想 / 压力</text>
+<text x="42" y="273" font-size="11.5" fill="#5b6070">vitality_ctx_event</text>
+<path d="M180,100 L240,86" fill="none" stroke="#7a7f8c" stroke-width="1.3" marker-end="url(#arr)"/>
+<path d="M370,116 L370,132" fill="none" stroke="#7a7f8c" stroke-width="1.3" marker-end="url(#arr)"/>
+<path d="M300,192 L300,208" fill="none" stroke="#7a7f8c" stroke-width="1.3" marker-end="url(#arr)"/>
+<path d="M440,192 L440,208" fill="none" stroke="#7a7f8c" stroke-width="1.3" marker-end="url(#arr)"/>
+<path d="M500,250 H540 V206 H580" fill="none" stroke="#a83f63" stroke-width="1.3" marker-end="url(#arr)"/>
+<path d="M500,270 H548 V82 H580" fill="none" stroke="#bf4520" stroke-width="1.3" marker-end="url(#arr-acc)"/>
+<path d="M180,255 H200 V330 H720 V294" fill="none" stroke="#6d4fc4" stroke-width="1.3" stroke-dasharray="5,4" marker-end="url(#arr)"/>
+<text x="206" y="345" font-size="11" fill="#6d4fc4">注入到下一步的预测阶段（咖啡 20 min 一阶起效）</text></svg></div>
+      <figcaption>能量层的残差已扣除个人基线、昼夜节律、活动负荷与 E 自身的贡献，所以体质差异不进入精力：整体心率 +8 bpm，第 4 天起精力分差 < 3（test_constitution_invariance）。</figcaption>
+    </figure>
+
+    <div class="cols">
+      <div class="card"><h4><span class="dot" style="background:#0e7a83"></span>精力层新增的量</h4>
+        <ul><li>隐状态 D 与其方差 P（标量）</li><li>个人常态 <code>vitality_habit_t</code>：夜间回充量、醒前 HRV、睡眠时长 / 深睡 / 碎片化（EWMA，可持久化）</li><li>50 桶的日间 V 分位直方图（按日历日指数衰减）</li></ul>
+      </div>
+      <div class="card"><h4><span class="dot" style="background:#bf4520"></span>从能量层拿的量</h4>
+        <ul><li>E、e_sd（折进精力带宽）</li><li>sleep_prob（睡眠段判定）、load、activity（观测权重 / 事件）</li><li>hr_resid、hrv_resid（观测）</li><li>昼夜节律形状 <code>energy_circadian()</code>（均衡线）</li></ul>
+      </div>
+    </div>
+
+  </section>
+
+  <section id="step">
+    <div class="sec-head"><span class="sec-no">03</span><h2>一步之内：预测、晨起、观测、裁剪、分位</h2></div>
+    <div class="rule"></div>
+
+    <p>流式接口 <code class="inl">vitality_ctx_step</code> 内部先走一次 <code class="inl">energy_ctx_step</code>，然后按六个阶段推进 D。批量接口 <code class="inl">vitality_compute</code> 是同一套代码逐点喂入，再加 15 min 的展示平滑（只平滑 vitality / score / 带，不改状态 v / d）；两者的 v / d 逐点一致到 1e-9（<code class="inl">test_stream_equals_batch</code>）。</p>
+
+    <figure>
+      <div class="fig-head"><span class="fig-no">FIG 2</span><span class="fig-title">一次 vitality_ctx_step 的六个阶段</span></div>
+      <div class="diagram-container"><svg viewBox="0 0 920 410" role="img" aria-label="一次 vitality_ctx_step 的六个阶段" font-family="'PingFang SC','Microsoft YaHei','Noto Sans SC',sans-serif"><title>一次 vitality_ctx_step 的六个阶段</title><desc>预测、睡眠段跟踪、z 化、权重、事件检测、两次标量卡尔曼更新、裁剪、分位与输出。</desc><defs><marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#7a7f8c"/></marker><marker id="arr-acc" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker></defs><rect width="920" height="410" fill="#ffffff"/><rect x="40" y="30" width="250" height="53" rx="6" fill="#fdeee8" stroke="#bf4520"/>
+<text x="52" y="50" font-size="13" font-weight="600" fill="#23252f">energy_ctx_step</text>
+<text x="52" y="68" font-size="11.5" fill="#5b6070">E · sleep_prob · load · activity · 残差</text>
+<rect x="40" y="110" width="250" height="68" rx="6" fill="#e6f4f5" stroke="#0e7a83"/>
+<text x="52" y="130" font-size="13" font-weight="600" fill="#23252f">① 预测</text>
+<text x="52" y="148" font-size="11.5" fill="#5b6070">D ← k·D，P ← k²P + q_d·h</text>
+<text x="52" y="163" font-size="11.5" fill="#5b6070">待注入的用户脉冲在此加入</text>
+<rect x="40" y="190" width="250" height="68" rx="6" fill="#e6f4f5" stroke="#0e7a83"/>
+<text x="52" y="210" font-size="13" font-weight="600" fill="#23252f">② 睡眠段跟踪</text>
+<text x="52" y="228" font-size="11.5" fill="#5b6070">sleep_prob ≥ 0.5 → 累计；无观测</text>
+<text x="52" y="243" font-size="11.5" fill="#5b6070">连续 3 个清醒样本 → 段结束</text>
+<rect x="40" y="270" width="250" height="83" rx="6" fill="#f2eeff" stroke="#6d4fc4"/>
+<text x="52" y="290" font-size="13" font-weight="600" fill="#23252f">段结束分流</text>
+<text x="52" y="308" font-size="11.5" fill="#5b6070">≥ 3 h：晨起初始化 WAKE</text>
+<text x="52" y="323" font-size="11.5" fill="#5b6070">15 min–3 h 且 9–20 点：小睡 NAP</text>
+<text x="52" y="338" font-size="11.5" fill="#5b6070">&lt; 2 h 内再睡：续睡合并</text>
+<rect x="340" y="110" width="250" height="68" rx="6" fill="#fbf1e2" stroke="#a8650f"/>
+<text x="352" y="130" font-size="13" font-weight="600" fill="#23252f">③ z 化</text>
+<text x="352" y="148" font-size="11.5" fill="#5b6070">z_hr = hr_resid / 7</text>
+<text x="352" y="163" font-size="11.5" fill="#5b6070">z_hrv = hrv_resid / 0.40</text>
+<rect x="340" y="190" width="250" height="68" rx="6" fill="#fbf1e2" stroke="#a8650f"/>
+<text x="352" y="210" font-size="13" font-weight="600" fill="#23252f">观测权重 w_act</text>
+<text x="352" y="228" font-size="11.5" fill="#5b6070">A ≤ 0.10 → 1；A ≥ 0.35 → 0</text>
+<text x="352" y="243" font-size="11.5" fill="#5b6070">L &gt; 0.60：A 高则 0，A 低则 ×0.5</text>
+<rect x="340" y="270" width="250" height="83" rx="6" fill="#f2eeff" stroke="#6d4fc4"/>
+<text x="352" y="290" font-size="13" font-weight="600" fill="#23252f">事件检测</text>
+<text x="352" y="308" font-size="11.5" fill="#5b6070">运动段（L≥0.5 且 A≥0.35）</text>
+<text x="352" y="323" font-size="11.5" fill="#5b6070">无分期小睡 / 低 HRV 拖拽</text>
+<text x="352" y="338" font-size="11.5" fill="#5b6070">唤醒·过载标志</text>
+<rect x="640" y="110" width="250" height="83" rx="6" fill="#fbe9ef" stroke="#a83f63"/>
+<text x="652" y="130" font-size="13" font-weight="600" fill="#23252f">④ 标量 KF ×2</text>
+<text x="652" y="148" font-size="11.5" fill="#5b6070">y = u(z_hr)，H = 3.0，R = 1.0 / w_act</text>
+<text x="652" y="163" font-size="11.5" fill="#5b6070">y = z_hrv，H = 2.0，R = 2.0 / w_act</text>
+<text x="652" y="178" font-size="11.5" fill="#5b6070">门控 |ν|/√S &gt; 4 丢弃</text>
+<rect x="640" y="190" width="250" height="53" rx="6" fill="#e8f4ec" stroke="#2c7a4b"/>
+<text x="652" y="210" font-size="13" font-weight="600" fill="#23252f">⑤ 裁剪</text>
+<text x="652" y="228" font-size="11.5" fill="#5b6070">−V* ≤ D ≤ 0.30·E</text>
+<rect x="640" y="270" width="250" height="68" rx="6" fill="#e8f4ec" stroke="#2c7a4b"/>
+<text x="652" y="290" font-size="13" font-weight="600" fill="#23252f">⑥ 分位 + 输出</text>
+<text x="652" y="308" font-size="11.5" fill="#5b6070">日间 V 记入 50 桶直方图</text>
+<text x="652" y="323" font-size="11.5" fill="#5b6070">vitality / percentile / score / 带 / 象限</text>
+<path d="M165.0,84 L165.0,110" fill="none" stroke="#7a7f8c" stroke-width="1.3" marker-end="url(#arr)"/>
+<path d="M165.0,177 L165.0,190" fill="none" stroke="#7a7f8c" stroke-width="1.3" marker-end="url(#arr)"/>
+<path d="M165.0,257 L165.0,270" fill="none" stroke="#7a7f8c" stroke-width="1.3" marker-end="url(#arr)"/>
+<path d="M290,140 H340" fill="none" stroke="#7a7f8c" stroke-width="1.3" marker-end="url(#arr)"/>
+<path d="M465.0,177 L465.0,190" fill="none" stroke="#7a7f8c" stroke-width="1.3" marker-end="url(#arr)"/>
+<path d="M465.0,257 L465.0,270" fill="none" stroke="#7a7f8c" stroke-width="1.3" marker-end="url(#arr)"/>
+<path d="M590,140 H640" fill="none" stroke="#7a7f8c" stroke-width="1.3" marker-end="url(#arr)"/>
+<path d="M765.0,192 L765.0,190" fill="none" stroke="#7a7f8c" stroke-width="1.3" marker-end="url(#arr)"/>
+<path d="M765.0,192 L765.0,190" fill="none" stroke="#7a7f8c" stroke-width="1.3" marker-end="url(#arr)"/>
+<path d="M765.0,243 L765.0,270" fill="none" stroke="#7a7f8c" stroke-width="1.3" marker-end="url(#arr)"/>
+<path d="M290,300 H320 V 380 H765.0 V 350" fill="none" stroke="#6d4fc4" stroke-width="1.3" stroke-dasharray="5,4" marker-end="url(#arr)"/>
+<text x="340" y="372" font-size="11" fill="#6d4fc4">晨起初始化 / 小睡脉冲直接改 D，再进入裁剪与输出</text>
+<text x="40" y="395" font-size="11" fill="#5b6070">睡眠中（SLEEP）与缺口（GAP）样本跳过 ③④，直接到 ⑤⑥：没有观测时 V 退化为均衡线。</text></svg></div>
+      <figcaption>睡眠段与缺口样本没有观测，直接进入裁剪与输出。晨起初始化与小睡脉冲直接改写 D。</figcaption>
+    </figure>
+
+    <h3>预测</h3>
+    <pre>k = exp(−h / τ_D(E))        D ← k·D        P ← k²·P + q_d·h        <span class="c">q_d = 0.02 /h，P0 = 0.01（晨起先验标准差 0.1）</span></pre>
+    <p class="small">稳态 P ≈ q_d·τ_D/2 ≈ 0.0075，D 的先验标准差约 0.09；能量低时 τ_D 变长（最长 112 min），疲惫状态下任何波动都恢复得慢。</p>
+    <h3>有界</h3>
+    <pre>−V* ≤ D ≤ d_cap · E          <span class="c">d_cap = 0.30：E = 0.4 时精力最多比均衡线高 0.12</span></pre>
+
+  </section>
+
+  <section id="obs">
+    <div class="sec-head"><span class="sec-no">04</span><h2>观测：残差 z 化、倒 U 变换、标量卡尔曼</h2></div>
+    <div class="rule"></div>
+
+    <pre>z_hr  = clip(hr_resid / 7, −6, 6)                 z_hrv = clip(hrv_resid / 0.40, −3, 3)
+u(z)  = z · (1 − z / 2.8)    z ≥ 0                u(z) = 0.6 · z    z &lt; 0         u ∈ [−2, 0.7]
+y = H·D + ε      H = 3.0（心率）/ 2.0（HRV）      R = 1.0 / w_act（心率）/ 2.0 / w_act（HRV）
+S = H²P + R      K = P·H / S      |y − H·D| / √S &gt; 4 → 丢弃      D ← D + K·(y − H·D)      P ← (1 − K·H)·P</pre>
+
+    <figure>
+      <div class="fig-head"><span class="fig-no">FIG 3</span><span class="fig-title">倒 U 变换 u(z_hr)</span></div>
+      <div class="diagram-container"><svg viewBox="0 0 920 300" role="img" aria-label="倒 U 变换：心率略高于本人常态抬精力，高太多转为过载" font-family="'PingFang SC','Microsoft YaHei','Noto Sans SC',sans-serif"><title>倒 U 变换：心率略高于本人常态抬精力，高太多转为过载</title><desc>横轴是日间心率残差的 z 值，纵轴是进入卡尔曼更新的观测量 u。</desc><defs><marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#7a7f8c"/></marker><marker id="arr-acc" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker></defs><rect width="920" height="300" fill="#ffffff"/><line x1="70" y1="93.87096774193549" x2="880" y2="93.87096774193549" stroke="#c9c4ba"/>
+<line x1="424.375" y1="30" x2="424.375" y2="250" stroke="#c9c4ba"/>
+<polyline points="70.0,235.8 75.1,235.8 80.1,235.8 85.2,235.8 90.2,234.4 95.3,232.3 100.4,230.1 105.4,228.0 110.5,225.9 115.6,223.7 120.6,221.6 125.7,219.5 130.7,217.4 135.8,215.2 140.9,213.1 145.9,211.0 151.0,208.8 156.1,206.7 161.1,204.6 166.2,202.5 171.2,200.3 176.3,198.2 181.4,196.1 186.4,193.9 191.5,191.8 196.6,189.7 201.6,187.5 206.7,185.4 211.7,183.3 216.8,181.2 221.9,179.0 226.9,176.9 232.0,174.8 237.1,172.6 242.1,170.5 247.2,168.4 252.2,166.3 257.3,164.1 262.4,162.0 267.4,159.9 272.5,157.7 277.6,155.6 282.6,153.5 287.7,151.4 292.7,149.2 297.8,147.1 302.9,145.0 307.9,142.8 313.0,140.7 318.1,138.6 323.1,136.5 328.2,134.3 333.2,132.2 338.3,130.1 343.4,127.9 348.4,125.8 353.5,123.7 358.6,121.5 363.6,119.4 368.7,117.3 373.7,115.2 378.8,113.0 383.9,110.9 388.9,108.8 394.0,106.6 399.1,104.5 404.1,102.4 409.2,100.3 414.2,98.1 419.3,96.0 424.4,93.9 429.4,90.4 434.5,87.0 439.6,83.8 444.6,80.7 449.7,77.7 454.7,74.9 459.8,72.1 464.9,69.5 469.9,67.1 475.0,64.7 480.1,62.5 485.1,60.4 490.2,58.5 495.2,56.6 500.3,54.9 505.4,53.3 510.4,51.9 515.5,50.5 520.6,49.3 525.6,48.2 530.7,47.3 535.7,46.5 540.8,45.8 545.9,45.2 550.9,44.8 556.0,44.4 561.1,44.3 566.1,44.2 571.2,44.3 576.2,44.4 581.3,44.8 586.4,45.2 591.4,45.8 596.5,46.5 601.6,47.3 606.6,48.2 611.7,49.3 616.7,50.5 621.8,51.9 626.9,53.3 631.9,54.9 637.0,56.6 642.1,58.5 647.1,60.4 652.2,62.5 657.2,64.7 662.3,67.1 667.4,69.5 672.4,72.1 677.5,74.9 682.6,77.7 687.6,80.7 692.7,83.8 697.7,87.0 702.8,90.4 707.9,93.9 712.9,97.5 718.0,101.2 723.1,105.1 728.1,109.1 733.2,113.2 738.2,117.4 743.3,121.8 748.4,126.3 753.4,130.9 758.5,135.7 763.6,140.6 768.6,145.6 773.7,150.7 778.7,156.0 783.8,161.4 788.9,166.9 793.9,172.5 799.0,178.3 804.1,184.2 809.1,190.2 814.2,196.3 819.2,202.6 824.3,209.0 829.4,215.5 834.4,222.2 839.5,229.0 844.6,235.8 849.6,235.8 854.7,235.8 859.7,235.8 864.8,235.8 869.9,235.8 874.9,235.8 880.0,235.8" fill="none" stroke="#0e7a83" stroke-width="2.2"/>
+<line x1="221.875" y1="90.87096774193549" x2="221.875" y2="96.87096774193549" stroke="#5b6070"/>
+<text x="221.875" y="109.87096774193549" font-size="11" fill="#5b6070" text-anchor="middle">−14 bpm</text>
+<line x1="323.125" y1="90.87096774193549" x2="323.125" y2="96.87096774193549" stroke="#5b6070"/>
+<text x="323.125" y="109.87096774193549" font-size="11" fill="#5b6070" text-anchor="middle">−7</text>
+<line x1="424.375" y1="90.87096774193549" x2="424.375" y2="96.87096774193549" stroke="#5b6070"/>
+<text x="424.375" y="109.87096774193549" font-size="11" fill="#5b6070" text-anchor="middle">0</text>
+<line x1="525.625" y1="90.87096774193549" x2="525.625" y2="96.87096774193549" stroke="#5b6070"/>
+<text x="525.625" y="109.87096774193549" font-size="11" fill="#5b6070" text-anchor="middle">+7</text>
+<line x1="566.125" y1="90.87096774193549" x2="566.125" y2="96.87096774193549" stroke="#5b6070"/>
+<line x1="626.875" y1="90.87096774193549" x2="626.875" y2="96.87096774193549" stroke="#5b6070"/>
+<text x="626.875" y="109.87096774193549" font-size="11" fill="#5b6070" text-anchor="middle">+14</text>
+<line x1="707.875" y1="90.87096774193549" x2="707.875" y2="96.87096774193549" stroke="#5b6070"/>
+<text x="707.875" y="109.87096774193549" font-size="11" fill="#5b6070" text-anchor="middle">+20 bpm</text>
+<line x1="829.375" y1="90.87096774193549" x2="829.375" y2="96.87096774193549" stroke="#5b6070"/>
+<text x="829.375" y="109.87096774193549" font-size="11" fill="#5b6070" text-anchor="middle">+28</text>
+<text x="880" y="125.87096774193549" font-size="11" fill="#5b6070" text-anchor="end">日间心率残差 z_hr（σ = 7 bpm）</text>
+<rect x="495.25" y="30" width="141.75" height="220" fill="#e6f4f5" opacity=".6"/>
+<text x="566.125" y="242" font-size="11" fill="#0e7a83" text-anchor="middle">轻度唤醒 AROUSAL [0.7, 2.1]</text>
+<rect x="637.0" y="30" width="243.0" height="220" fill="#fdeee8" opacity=".6"/>
+<text x="758.5" y="242" font-size="11" fill="#bf4520" text-anchor="middle">过载 STRESS（z &gt; 2.1，持续 10 min）</text>
+<text x="161.125" y="44" font-size="11" fill="#a8650f" text-anchor="middle">犯困（斜率 0.6）</text>
+<circle cx="566.125" cy="44.19354838709677" r="4" fill="#0e7a83"/>
+<text x="566.125" y="34.19354838709677" font-size="11" fill="#0e7a83" text-anchor="middle">峰值 z = 1.4（≈ +10 bpm），u = 0.7</text>
+<circle cx="707.875" cy="93.87096774193549" r="4" fill="#bf4520"/>
+<text x="715.875" y="85.87096774193549" font-size="11" fill="#bf4520">零点 z_c = 2.8：再高就是负收益</text>
+<text x="66" y="37.09677419354841" font-size="11" fill="#5b6070" text-anchor="end">u(z)</text>
+<text x="66" y="239.8064516129032" font-size="11" fill="#5b6070" text-anchor="end">−2</text></svg></div>
+      <figcaption>静坐时心率比本人常态高 5–10 bpm 通常是兴奋 / 专注 / 咖啡，高 20 bpm 以上而没在动则是紧张 / 过载。标志位只是文案提示，效应本身走观测通道。</figcaption>
+    </figure>
+
+    <h3>观测权重：为什么用活动量 A 而不是负荷 L</h3>
+    <p>负荷 L 含心率项：心率一高 L 就高，用 L 排除观测会恰好把我们想测的"心率高但没动"排除掉。活动量 A 来自步数，是外生的，所以 A 是主判据：</p>
+    <pre>w_act = clip( 1 − (A − 0.10) / (0.35 − 0.10), 0, 1 )
+L &gt; 0.60 且 A ≥ 0.10 → w_act = 0（在运动，不用）      L &gt; 0.60 且 A &lt; 0.10 → w_act × 0.5（保留但少信）</pre>
+    <p class="small">示例：09:30–10:15 心率 +10 bpm 未运动，D 由 +0.028 升至 +0.061；测试里 +22 bpm 持续 1 h 使 D 下降 &gt; 0.01。</p>
+
+  </section>
+
+  <section id="events">
+    <div class="sec-head"><span class="sec-no">05</span><h2>事件：只认生理效应，不猜原因</h2></div>
+    <div class="rule"></div>
+
+    <table>
+      <thead><tr><th>事件</th><th>判据</th><th>效应</th><th>示例实测（第 4 天）</th></tr></thead>
+      <tbody>
+        <tr><td><span class="dot" style="background:#2c7a4b"></span>运动回弹</td><td>L ≥ 0.5 <b>且</b> A ≥ 0.35 进入；结束后连续 2 点（L ≤ 0.10 或 A ≤ 0.10）；30 min 未平复则放弃</td><td>+0.12 × min(1, 时长/30 min)，≥ 10 min 起算</td><td>18:00–18:30 跑步，18:35 D -0.011 → <b>+0.096</b>，精力 39.8 → 50.6</td></tr>
+        <tr><td><span class="dot" style="background:#3f5bd9"></span>小睡（有分期）</td><td>睡眠段 15 min–3 h，且在 9–20 点</td><td>+0.15 × min(1, 时长/20 min)</td><td>13:00–13:20 午睡，13:30 D -0.008 → <b>+0.129</b>，精力 55.6 → 68.6</td></tr>
+        <tr><td><span class="dot" style="background:#3f5bd9"></span>小睡（无分期）</td><td>z_hr ≤ −0.75 且 A &lt; 0.05 持续 ≥ 15 min 后恢复</td><td>同上</td><td>—</td></tr>
+        <tr><td><span class="dot" style="background:#a83f63"></span>疲劳拖拽</td><td>z_hrv ≤ −1 且 w_act &gt; 0 持续 ≥ 30 min</td><td>持续项 dD = −0.03·(−z_hrv)·dt</td><td>—</td></tr>
+        <tr><td><span class="dot" style="background:#0e7a83"></span>唤醒 / 过载标志</td><td>0.7 ≤ z_hr ≤ 2.1 / z_hr &gt; 2.1 持续 10 min</td><td>只打标志，效应走观测</td><td>09:30–10:15 AROUSAL</td></tr>
+        <tr><td><span class="dot" style="background:#6d4fc4"></span>用户标记</td><td><code>vitality_ctx_event</code></td><td>咖啡 +0.10（20 min 一阶起效）、冥想 +0.08、压力事件 −0.10、酒精 −0.08</td><td>15:00 咖啡标记，D +0.006 → 15:15 <b>+0.042</b></td></tr>
+      </tbody>
+    </table>
+    <div class="note warn"><b>关于咖啡：</b>示例里咖啡标记只抬了约 0.04 而不是 0.10——合成数据里心率没有相应升高，观测把它拉回来了。真实用户喝咖啡心率通常升 3–8 bpm，此时观测与标记同向。库不从数据里"识别"咖啡。</div>
+
+  </section>
+
+  <section id="morning">
+    <div class="sec-head"><span class="sec-no">06</span><h2>晨起初始化：三项都相对本人常态</h2></div>
+    <div class="rule"></div>
+
+    <pre>x1 = clip( (ΔE − ΔE̅) / 0.30, ±0.5 )                          <span class="c">今晚能量回充量 vs 本人常态</span>
+x2 = clip( (HRV_wake − HRV̅_wake) / 0.44, ±0.5 )               <span class="c">醒前 1 h 的 HRV vs 本人夜间常态</span>
+x3 = clip( 0.5·q_时长 + 0.25·q_深睡 − 0.25·q_碎片, ±0.5 )       <span class="c">时长差 2 h / 深睡与碎片化差 10 个百分点记满分</span>
+D_init = 0.40 · ( 0.4·x1 + 0.3·x2 + 0.3·x3 )                   <span class="c">|D_init| ≤ 0.2；没有常态的项记 0</span></pre>
+    <table>
+      <thead><tr><th>规则</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>主睡眠判定</td><td>sleep_prob ≥ 0.5 为睡眠段；连续 3 个清醒样本（15 min）结束；≥ 3 h 才算"一晚"，否则按小睡</td></tr>
+        <tr><td>常态学习</td><td>前 3 晚累计平均（LEARNING），之后 EWMA λ = 0.2（约 5 晚记忆）；<code>get/set_habit</code> 持久化</td></tr>
+        <tr><td>续睡合并</td><td>主睡眠结束后 2 h 内再次入睡 → 回滚上次常态更新，整夜重算（夜醒 20 min 不会拆成两晚，<code>test_night_resume_merge</code>）</td></tr>
+        <tr><td>不知道就不猜</td><td>第一晚没有常态，D_init = 0</td></tr>
+      </tbody>
+    </table>
+    <p class="small">示例实测：第 4 天 07:10 起床 D_init = +0.033；第 5 天只睡 5 h，05:10 起床 D_init = <b>-0.072</b>。幅度没有到 −0.2 是因为 x1 项部分抵消：熬到 0 点才睡的人入睡时 E 更低，5 h 回充量并不比平时少多少；真实数据若证实，可改用"醒时 E 相对常态"或提高 w_sleep。</p>
+
+  </section>
+
+  <section id="scale">
+    <div class="sec-head"><span class="sec-no">07</span><h2>两种 0–100 刻度，都只跟自己比</h2></div>
+    <div class="rule"></div>
+
+
+    <figure>
+      <div class="fig-head"><span class="fig-no">FIG 4</span><span class="fig-title">vitality 与 percentile</span></div>
+      <div class="diagram-container"><svg viewBox="0 0 920 230" role="img" aria-label="两种 0–100 刻度" font-family="'PingFang SC','Microsoft YaHei','Noto Sans SC',sans-serif"><title>两种 0–100 刻度</title><desc>绝对自我刻度与个人分位刻度的定义与适用场景。</desc><defs><marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#7a7f8c"/></marker><marker id="arr-acc" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker></defs><rect width="920" height="230" fill="#ffffff"/><rect x="40" y="30" width="400" height="170" rx="6" fill="#e6f4f5" stroke="#0e7a83"/>
+<text x="52" y="50" font-size="13" font-weight="600" fill="#23252f">vitality = 100 × V（绝对自我刻度）</text>
+<text x="52" y="68" font-size="11.5" fill="#5b6070">立即可用</text>
+<text x="52" y="83" font-size="11.5" fill="#5b6070">E 与 D 本身已相对个人基线</text>
+<text x="52" y="98" font-size="11.5" fill="#5b6070">适合曲线、带宽、与能量同图</text>
+<text x="52" y="113" font-size="11.5" fill="#5b6070">示例：午睡后 55.6 → 68.6</text>
+<rect x="480" y="30" width="400" height="170" rx="6" fill="#f2eeff" stroke="#6d4fc4"/>
+<text x="492" y="50" font-size="13" font-weight="600" fill="#23252f">percentile（本人历史分位）</text>
+<text x="492" y="68" font-size="11.5" fill="#5b6070">需要 ≥ 3 个日间（PCT_READY）</text>
+<text x="492" y="83" font-size="11.5" fill="#5b6070">过去约 28 天日间 V 的经验分位（半衰期 14 天）</text>
+<text x="492" y="98" font-size="11.5" fill="#5b6070">文案：“比你 80% 的时候好”</text>
+<text x="492" y="113" font-size="11.5" fill="#5b6070">score_mode 选择 score 列取哪个</text>
+<text x="460" y="120" font-size="22" fill="#71768a" text-anchor="middle">×</text>
+<text x="460" y="215" font-size="11.5" fill="#bf4520" text-anchor="middle">两种刻度都只跟自己比，库内不存在任何跨人统计</text></svg></div>
+      <figcaption>score_mode = 0 取 vitality，1 取 percentile（学习期自动退回 vitality），2 取两者平均。</figcaption>
+    </figure>
+
+    <pre>d_sd = sqrt( P + (V*/E)² · e_sd² )             lower / upper = 100 · clip( V ∓ 1.96 · d_sd )</pre>
+    <p class="small">能量层的不确定性按 V 对 E 的灵敏度折进精力带宽；冷启动时带宽大，随能量层基线建立而收窄。</p>
+
+  </section>
+
+  <section id="api">
+    <div class="sec-head"><span class="sec-no">08</span><h2>接口</h2></div>
+    <div class="rule"></div>
+
+    <pre><span class="c">/* 流式：内部自带 energy_ctx_t */</span>
+vitality_ctx_t vc;
+vitality_ctx_init(&amp;vc, &amp;ecfg, &amp;vcfg);                 <span class="c">/* 配置可为 NULL */</span>
+vitality_ctx_set_habit(&amp;vc, &amp;saved_habit);            <span class="c">/* 可选：恢复个人常态 */</span>
+for (each 5-min sample) {
+    energy_point_t ep; vitality_point_t vp;
+    vitality_ctx_step(&amp;vc, &amp;sample, &amp;ep, &amp;vp);       <span class="c">/* ep.energy, vp.score, vp.quadrant, vp.flags */</span>
+}
+vitality_ctx_event(&amp;vc, VITALITY_EVENT_CAFFEINE, 0.0);  <span class="c">/* 用户标记，amplitude ≤ 0 用默认幅度 */</span>
+vitality_ctx_get_habit(&amp;vc, &amp;saved_habit);
+
+<span class="c">/* 已有自己的 energy_ctx_t：拿到 energy_point_t 后 */</span>
+vitality_ctx_feed(&amp;vc, &amp;sample, &amp;ep, &amp;vp);
+
+<span class="c">/* 批量（内含 energy_compute）*/</span>
+vitality_output_t out;
+vitality_compute(samples, n, &amp;ecfg, &amp;vcfg, &amp;out);     <span class="c">/* out.points / out.daily / out.energy / out.habit */</span>
+vitality_output_free(&amp;out);
+
+<span class="c">/* 命令行：能量列之后追加精力列 */</span>
+./build/energy_cli panel.csv --vitality --out out.csv</pre>
+    <table>
+      <thead><tr><th>标志位</th><th>含义</th></tr></thead>
+      <tbody>
+        <tr><td><code>SLEEP</code> / <code>GAP</code> / <code>NO_OBS</code></td><td>睡眠中 / 数据缺口 / 本点无可用观测（含运动中、能量基线未建立）</td></tr>
+        <tr><td><code>WAKE</code> / <code>LEARNING</code></td><td>本点做了晨起初始化（<code>d_init</code> 字段有效）/ 前 3 晚学习期</td></tr>
+        <tr><td><code>EXERCISE</code> / <code>NAP</code> / <code>FATIGUE</code> / <code>USER</code></td><td>本点注入了对应脉冲 / 拖拽</td></tr>
+        <tr><td><code>AROUSAL</code> / <code>STRESS</code></td><td>轻度唤醒 / 过载（文案用）</td></tr>
+        <tr><td><code>PCT_READY</code></td><td>分位刻度可用（≥ 3 个日间）</td></tr>
+      </tbody>
+    </table>
+    <p class="small">非法配置：<code class="inl">vitality_config_validate</code> 逐项范围检查，<code class="inl">vitality_compute</code> 返回 <code class="inl">ENERGY_EINVAL</code>，流式上下文每步返回错误；时间倒退返回 <code class="inl">ENERGY_EDOMAIN</code>；NaN 输入按缺失处理（<code class="inl">test_nan_fuzz</code>）。</p>
+
+  </section>
+
+  <section id="verify">
+    <div class="sec-head"><span class="sec-no">09</span><h2>验证：数字有出处</h2></div>
+    <div class="rule"></div>
+
+    <div class="stats">
+      <div class="stat g"><div class="n">27,445</div><div class="l">精力层测试断言（能量层另有 81,794）</div></div>
+      <div class="stat t"><div class="n">93.1%</div><div class="l">vitality.c 行覆盖（gcov，694 行）</div></div>
+      <div class="stat i"><div class="n">4.14 µs</div><div class="l">精力层每步增量（桌面 x86-64，-O2）</div></div>
+      <div class="stat a"><div class="n">3736 B</div><div class="l">vitality_ctx_t（含 energy_ctx_t 2344 B）</div></div>
+    </div>
+    <table>
+      <thead><tr><th>命令</th><th>结果</th></tr></thead>
+      <tbody>
+        <tr><td><code>make test</code></td><td>能量 OK: 81,794 checks, 0 failures；精力 OK: 27,445 checks, 0 failures</td></tr>
+        <tr><td><code>make sanitize</code>（ASan + UBSan）</td><td>两套测试均通过</td></tr>
+        <tr><td><code>make coverage</code></td><td>vitality.c 93.1%，energy.c 97.0%</td></tr>
+        <tr><td><code>make bench</code>（21 天 6048 点）</td><td>能量流式 4.52 µs/步，能量 + 精力 8.66 µs/步</td></tr>
+        <tr><td><code>make check</code>（Python 对照）</td><td>本环境缺少 Python 参考实现，未运行；精力层目前没有 Python 参考</td></tr>
+      </tbody>
+    </table>
+    <p class="small">测试覆盖：默认参数与非法参数；子函数（τ、均衡线、倒 U、裁剪、象限）；有界与睡眠中无观测；流式 == 批量；事件位置 / 方向 / 幅度与日汇总；用户标记与上限；晨起初始化（短睡为负、首晚为 0、学习期退出、常态持久化）；续睡合并；三种 score_mode；体质不变性；开环单调；NaN 与 3 h 缺口；能量层残差暴露。</p>
+    <div class="note hot"><b>全部数字来自合成数据。</b>幅度参数（a_nap 0.15、a_exercise 0.12、z_c 2.8 等）需要在真实佩戴数据上用即时自评（"此刻精神如何 1–5"）校准；文档中的曲线是模型行为的展示，不是对真实用户的验证结果。</div>
+
+  </section>
+
+  <section id="limits">
+    <div class="sec-head"><span class="sec-no">10</span><h2>边界</h2></div>
+    <div class="rule"></div>
+
+    <div class="cols">
+      <div class="card"><h4><span class="dot" style="background:#a83f63"></span>没做的</h4>
+        <ul><li>识别咖啡 / 冥想 / 压力事件的原因（只接受用户标记）</li><li>跨用户的任何统计或排名</li><li>离线参数拟合（与能量层一样放在 Python 端）</li><li>医学用途</li></ul>
+      </div>
+      <div class="card"><h4><span class="dot" style="background:#a8650f"></span>需要真实数据决定的</h4>
+        <ul><li>短睡场景下 D_init 的 ΔE 项是否该换成"醒时 E 相对常态"</li><li>清醒后首小时的残差是否要降权（能量层"心率随 E"假设的伴随现象）</li><li>倒 U 零点 z_c 与各事件幅度</li><li>分位窗口 28 天是否合适（轮班 / 出差）</li></ul>
+      </div>
+    </div>
+
+  </section>
+
+  <footer>
+    <span>energy-state-c · vitality v1.0.0 / energy v1.2.0 · C99 · 无第三方依赖</span>
+    <span>技术说明 · 图表基于真实实现与实测（合成）数据</span>
+  </footer>
+</div>
+</body>
+</html>

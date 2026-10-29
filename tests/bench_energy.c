@@ -7,6 +7,7 @@
  */
 
 #include "energy.h"
+#include "vitality.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -80,6 +81,27 @@ int main(void)
     }
     const double dts = (now_ms() - t1) / (double)reps;
     printf("流式: %.2f ms/次，%.2f µs/步\n", dts, dts * 1000.0 / (double)n);
+
+    /* 精力层（流式，内含能量层一步）：增量开销 = 本行 − 上一行 */
+    vitality_ctx_t *vctx = (vitality_ctx_t *)malloc(sizeof(*vctx));
+    if (!vctx) {
+        free(s);
+        return 1;
+    }
+    vitality_point_t vp;
+    const double t2 = now_ms();
+    for (int r = 0; r < reps; r++) {
+        vitality_ctx_init(vctx, &cfg, NULL);
+        for (size_t i = 0; i < n; i++) {
+            vitality_ctx_step(vctx, &s[i], &p, &vp);
+        }
+    }
+    const double dtv = (now_ms() - t2) / (double)reps;
+    printf("能量+精力流式: %.2f ms/次，%.2f µs/步（精力层增量约 %.2f µs/步）\n", dtv,
+           dtv * 1000.0 / (double)n, (dtv - dts) * 1000.0 / (double)n);
+    printf("上下文大小: energy_ctx_t %zu B，vitality_ctx_t %zu B（含 energy_ctx_t）\n", sizeof(energy_ctx_t),
+           sizeof(*vctx));
+    free(vctx);
 
     free(s);
     return 0;

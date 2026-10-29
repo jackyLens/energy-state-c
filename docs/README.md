@@ -4,6 +4,9 @@
 |---|---|---|---|
 | 产品说明 | 产品 / 设计 / 运营 | [product.html](product.html) | [product.pdf](product.pdf) |
 | 技术说明 | 算法 / 后端 / 客户端 | [technical.html](technical.html) | [technical.pdf](technical.pdf) |
+| 精力 · 产品说明 | 产品 / 设计 / 运营 | [vitality_product.html](vitality_product.html) | [vitality_product.pdf](vitality_product.pdf) |
+| 精力 · 技术说明 | 算法 / 后端 / 客户端 | [vitality_technical.html](vitality_technical.html) | [vitality_technical.pdf](vitality_technical.pdf) |
+| 精力 · 算法设计 | 算法 | [vitality_design.md](vitality_design.md)（Mermaid 流程图，GitHub 直接渲染） | — |
 
 两份文档都是**自包含 HTML**（内联 SVG、无外部图片/字体请求），直接双击用浏览器打开即可；PDF 由同一份 HTML 打印生成，适合在 GitLab 里直接预览或转发。
 
@@ -23,6 +26,8 @@
 3. **0–100 刻度**（低 / 常见 / 接近满格，以及“0 分结构上不可达”）
 
 配色是按语义分配的六种色相（采集=靛蓝、装配=紫、派生=琥珀、状态=赤陶（焦点）、滤波=玫红、呈现=绿），不是装饰性彩虹；正文表格里的色点与图例一致。
+
+精力技术说明里的五张图：级联结构、一步流水线、倒 U 变换 u(z)、两种 0–100 刻度、验证矩阵；产品说明里的四张图：事件日与短睡日的能量/精力双轨曲线（`build/vitality_demo.csv` 真实输出）、四象限、刻度。
 
 ## 重新生成 PDF
 
@@ -45,8 +50,19 @@ make docs CHROME=/path/to/chrome
 
 技术说明 §04 新增"个体化观测模型"（个人基线的引导、冷启动、EWMA 更新、异常段降权、持久化）以及日间方程、缺口、流式负荷、压力量纲的修正；产品说明的"边界"一节改为"只跟自己比"的口径。文档中的 v1.2 数字来自合成数据，未在真实用户数据上验证。
 
+## 精力层 v1.0
+
+新增 `vitality_*.html/pdf` 与 `vitality_design.md`。两份 HTML 由 `scripts/gen_vitality_docs.py` 生成（图中曲线取自 `make example` 的 CSV），
+手工改文案请改脚本而不是 HTML：
+
+```bash
+make example && ./build/vitality_demo --csv build/vitality_demo.csv
+python3 scripts/gen_vitality_docs.py build/vitality_demo.csv
+make docs
+```
+
 ## 维护约定
 
-- 文档里的数字（测试断言数、覆盖率、一致性偏差、性能）必须与仓库实测一致；改动后同步更新 **技术说明 §7** 与首页统计。
+- 文档里的数字（测试断言数、覆盖率、一致性偏差、性能）必须与仓库实测一致；改动后同步更新 **技术说明 §7**、**精力技术说明 §9**（`gen_vitality_docs.py` 的 `NUMBERS`）与首页统计。
 - 图里的数值来自 `data/sample_panel.csv` 的真实输出；换样例数据后需要重新生成曲线路径。
 - 修改文案时不要出现“测量 / 诊断 / 治疗”等措辞（见产品说明 §6）。

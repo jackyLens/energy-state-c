@@ -78,7 +78,7 @@ int main(int argc, char **argv)
     vitality_ctx_init(&ctx, &ecfg, &vcfg);
 
     FILE *fp = csv ? fopen(csv, "w") : NULL;
-    if (fp) fprintf(fp, "t_h,tod,hr,e,energy,v_star,d,v,vitality,percentile,score,lower,upper,flags\n");
+    if (fp) fprintf(fp, "t_h,tod,hr,e,energy,v_star,d,d_init,v,vitality,percentile,score,lower,upper,flags\n");
 
     printf("vitality-state-c %s（能量 %s）\n", vitality_version(), energy_version());
     printf("第 4 天（day=3）场景：09:30 轻度唤醒 / 13:00 午睡 20min / 15:00 咖啡标记 / 18:00 跑步 30min\n\n");
@@ -100,8 +100,8 @@ int main(int argc, char **argv)
             return 1;
         }
         if (fp) {
-            fprintf(fp, "%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%u\n", vp.t_h, vp.tod, hr,
-                    vp.e, vp.energy, vp.v_star, vp.d, vp.v, vp.vitality, vp.percentile, vp.score, vp.lower,
+            fprintf(fp, "%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%u\n", vp.t_h, vp.tod, hr,
+                    vp.e, vp.energy, vp.v_star, vp.d, vp.d_init, vp.v, vp.vitality, vp.percentile, vp.score, vp.lower,
                     vp.upper, vp.flags);
         }
         const double tod = fmod(t, 24.0);

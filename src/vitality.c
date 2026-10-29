@@ -49,7 +49,7 @@ void vitality_dyn_default(vitality_dyn_t *c)
     c->lambda = 1.5;
     c->d_cap = 0.30;
     c->q_d = 0.02;
-    c->p0 = 0.04;
+    c->p0 = 0.01;
 }
 
 void vitality_obs_default(vitality_obs_t *c)
@@ -435,9 +435,6 @@ static int sleep_close(vitality_ctx_t *ctx, double e_now, double *d_init_out)
         x3 = vclamp(q, -0.5, 0.5);
     }
     const double d_init = m->gain * (m->w_delta_e * x1 + m->w_hrv * x2 + m->w_sleep * x3);
-#ifdef VIT_DEBUG
-    fprintf(stderr, "[close] sleep_h=%.2f dE=%.3f(h %.3f) hrv=%.3f(h %.3f) deep=%.3f(h %.3f) wake=%.3f(h %.3f) x=%.3f %.3f %.3f d_init=%.4f\n", sleep_h, delta_e, h->delta_e, hrv, h->hrv_wake, deep, h->deep_frac, wake, h->wake_frac, x1, x2, x3, d_init);
-#endif
 
     /* 更新常态：前 cold_nights 晚累计平均，之后 EWMA（先留快照，续睡合并时回滚重算） */
     ctx->habit_before_close = ctx->habit;
