@@ -8,7 +8,7 @@ LIB_SRC := src/energy.c
 CLI_SRC := src/main.c
 TEST_SRC := tests/test_energy.c
 
-.PHONY: all lib cli test sanitize bench example check coverage clean
+.PHONY: all lib cli test sanitize bench example check coverage docs clean
 
 all: $(BUILD)/energy_cli $(BUILD)/test_energy $(BUILD)/stream_demo
 
@@ -51,6 +51,19 @@ sanitize: | $(BUILD)
 		$(LIB_SRC) $(TEST_SRC) -lm -o $(BUILD)/test_energy_san
 	@$(BUILD)/test_energy_san
 	@echo "sanitizers: OK"
+
+CHROME ?= $(shell command -v google-chrome 2>/dev/null || command -v chromium 2>/dev/null || echo "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+
+docs:
+	@test -x "$(CHROME)" || (echo "需要 Chrome/Chromium：make docs CHROME=/path/to/chrome"; exit 1)
+	@mkdir -p $(BUILD)
+	@"$(CHROME)" --headless=new --no-pdf-header-footer --no-sandbox --disable-gpu \
+		--user-data-dir=$(CURDIR)/$(BUILD)/chrome-docs \
+		--print-to-pdf=docs/technical.pdf "file://$(CURDIR)/docs/technical.html" 2>/dev/null
+	@"$(CHROME)" --headless=new --no-pdf-header-footer --no-sandbox --disable-gpu \
+		--user-data-dir=$(CURDIR)/$(BUILD)/chrome-docs \
+		--print-to-pdf=docs/product.pdf "file://$(CURDIR)/docs/product.html" 2>/dev/null
+	@echo "docs: docs/technical.pdf, docs/product.pdf"
 
 coverage: | $(BUILD)
 	$(CC) -O0 -g --coverage -std=c99 -Wall -Wextra $(INC) -c src/energy.c -o $(BUILD)/energy_cov.o

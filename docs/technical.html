@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>energy-state-c 技术说明 · 从五路信号到一条能量曲线</title>
+<style>
+  :root{
+    --paper:#faf7f2; --paper-2:#f2ece1; --ink:#23252f; --muted:#5b6070; --soft:#71768a;
+    --rule:rgba(35,37,47,.14); --rule-2:rgba(35,37,47,.07);
+    --indigo:#3f5bd9; --indigo-t:#eef1ff;
+    --violet:#6d4fc4; --violet-t:#f2eeff;
+    --amber:#a8650f;  --amber-t:#fbf1e2;
+    --teal:#0e7a83;   --teal-t:#e6f4f5;
+    --rose:#a83f63;   --rose-t:#fbe9ef;
+    --green:#2c7a4b;  --green-t:#e8f4ec;
+    --accent:#bf4520; --accent-t:#fdeee8;
+    --sans:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+    --serif:"Songti SC","Noto Serif SC","Source Han Serif SC",Georgia,"Times New Roman",serif;
+    --mono:"SF Mono",ui-monospace,Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15.5px;line-height:1.72;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding:56px 40px 96px}
+  a{color:var(--teal);text-decoration:none;border-bottom:1px solid rgba(14,122,131,.25)}
+  a:hover{border-bottom-color:var(--teal)}
+
+  /* header */
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
+  h1{font-family:var(--serif);font-weight:400;font-size:clamp(34px,4vw,52px);line-height:1.18;letter-spacing:-.01em;margin:14px 0 16px}
+  .lede{font-size:17px;color:var(--muted);max-width:64ch}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
+  .chip{font-family:var(--mono);font-size:11px;padding:5px 10px;border:1px solid var(--rule);border-radius:4px;color:var(--muted);background:#fff}
+  .chip b{color:var(--ink);font-weight:600}
+
+  /* toc */
+  .toc{display:flex;flex-wrap:wrap;gap:6px 18px;margin:34px 0 8px;padding:14px 0;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);font-size:13px}
+  .toc span{color:var(--soft);font-family:var(--mono);font-size:10px;letter-spacing:.12em;margin-right:4px}
+  .toc a{border:none;color:var(--muted)}
+  .toc a:hover{color:var(--teal)}
+
+  /* sections */
+  section{margin-top:64px}
+  .sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:8px}
+  .sec-no{font-family:var(--mono);font-size:11px;letter-spacing:.16em;color:var(--soft)}
+  h2{font-family:var(--serif);font-weight:400;font-size:30px;letter-spacing:-.01em}
+  h3{font-size:17px;font-weight:600;margin:30px 0 10px}
+  p{margin:10px 0;color:#2e3140}
+  .small{font-size:13.5px;color:var(--muted)}
+  .rule{height:2px;width:56px;margin:10px 0 22px;background:var(--accent);border-radius:2px}
+
+  /* figure */
+  figure{margin:26px 0 34px;break-inside:avoid}
+  .fig-head{display:flex;align-items:baseline;gap:10px;margin-bottom:10px}
+  .fig-no{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:#fff;background:var(--ink);padding:3px 7px;border-radius:3px}
+  .fig-title{font-size:14px;font-weight:600;color:var(--ink)}
+  .diagram-container{overflow-x:auto;border:1px solid var(--rule);border-radius:8px;background:#fff}
+  svg{display:block;width:100%;min-width:1000px;height:auto}
+  figcaption{font-size:13px;color:var(--muted);margin-top:10px;padding-left:2px}
+
+  /* notes */
+  .note{border-left:3px solid var(--teal);background:var(--teal-t);padding:14px 18px;border-radius:0 6px 6px 0;margin:20px 0;font-size:14px}
+  .note.warn{border-left-color:var(--amber);background:var(--amber-t)}
+  .note.hot{border-left-color:var(--accent);background:var(--accent-t)}
+  .note b{font-weight:600}
+
+  /* tables */
+  table{width:100%;border-collapse:collapse;margin:18px 0 8px;font-size:13.5px;background:#fff;border:1px solid var(--rule);border-radius:8px;overflow:hidden}
+  th{text-align:left;font-weight:600;font-size:12px;letter-spacing:.04em;color:var(--muted);background:var(--paper-2);padding:10px 12px;border-bottom:1px solid var(--rule)}
+  td{padding:10px 12px;border-bottom:1px solid var(--rule-2);vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  td code,th code{font-family:var(--mono);font-size:12px;background:var(--paper-2);padding:1px 5px;border-radius:3px}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;vertical-align:1px}
+
+  /* code */
+  pre{font-family:var(--mono);font-size:12.5px;line-height:1.6;background:#22242e;color:#f2efe9;padding:16px 18px;border-radius:8px;overflow-x:auto;margin:16px 0}
+  pre .c{color:#9aa0b5}
+  pre .k{color:#f0a878}
+  pre .s{color:#9fd6a8}
+  code.inl{font-family:var(--mono);font-size:12.5px;background:var(--paper-2);padding:1px 5px;border-radius:3px}
+
+  /* stats */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:22px 0}
+  .stat{background:#fff;border:1px solid var(--rule);border-radius:8px;padding:14px 16px}
+  .stat .n{font-family:var(--serif);font-size:28px;line-height:1.1}
+  .stat .l{font-size:12px;color:var(--muted);margin-top:4px}
+  .stat.i .n{color:var(--indigo)} .stat.t .n{color:var(--teal)} .stat.g .n{color:var(--green)} .stat.a .n{color:var(--amber)}
+
+  /* two-col */
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:18px 0}
+  .card{background:#fff;border:1px solid var(--rule);border-radius:8px;padding:16px 18px}
+  .card h4{font-size:14px;margin-bottom:6px;display:flex;align-items:center;gap:8px}
+  .card ul{margin:8px 0 0 18px;font-size:13.5px;color:var(--muted)}
+  .card li{margin:4px 0}
+
+  footer{margin-top:80px;padding-top:22px;border-top:1px solid var(--rule);font-size:12.5px;color:var(--soft);display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
+
+  @media (max-width:820px){
+    .wrap{padding:32px 20px 64px}
+    .stats{grid-template-columns:repeat(2,1fr)}
+    .cols{grid-template-columns:1fr}
+    svg{min-width:0}
+    .diagram-container{overflow-x:auto}
+  }
+  .cover{display:none}
+  @media print{
+    .cover{display:block;margin-top:26px;padding-top:18px;border-top:1px solid var(--rule)}
+    .cover h3{font-family:var(--serif);font-weight:400;font-size:20px;margin:0 0 8px}
+    .cover p{font-size:12.5px;color:var(--muted);margin:4px 0}
+    .cover-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:16px 0 20px}
+    .cover-cell{border:1px solid var(--rule);border-radius:6px;padding:10px 12px}
+    .cover-cell .n{font-family:var(--serif);font-size:24px;line-height:1.1}
+    .cover-cell .l{font-size:10.5px;color:var(--muted);margin-top:2px}
+    .cover-toc{columns:2;column-gap:28px;margin:6px 0 0 18px;font-size:11.5px;color:var(--muted)}
+    .cover-toc li{margin:3px 0;break-inside:avoid}
+    #flow,#what{break-before:page}
+  }
+  @media print{
+    @page{ size:A4; margin:11mm 12mm; }
+    body{background:#fff;font-size:12.6px;line-height:1.62}
+    .wrap{padding:0;max-width:none}
+    h1{font-size:32px;margin:4px 0 8px}
+    .lede{font-size:13.5px;max-width:none}
+    .meta{margin-top:10px}
+    .toc{display:none}
+    section{margin-top:24px}
+    .sec-head{margin-bottom:2px}
+    h2{font-size:23px}
+    .rule{margin:6px 0 12px}
+    figure{margin:10px 0 18px}
+    .diagram-container{zoom:.8;border-color:#e5e0d6;overflow:visible}
+    svg{min-width:0}
+    .stats{margin:10px 0}
+    .card{padding:10px 12px}
+    table{font-size:11.5px}
+    th,td{padding:6px 8px}
+    pre{font-size:10px;padding:10px 12px}
+    footer{margin-top:24px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">energy-state-c · technical note · v1.1.1</div>
+    <h1>从五路信号到一条能量曲线</h1>
+    <p class="lede">这个 C 库把智能戒指的心率、HRV、睡眠分期、步数与压力，变成一条 5 分钟粒度、0–100 的能量曲线，附带每日汇总与睡眠恢复报告。本文说明它的数据流、模型、接口与验证边界。</p>
+    <div class="meta">
+      <span class="chip"><b>C99</b> + libm</span>
+      <span class="chip">单头文件 API</span>
+      <span class="chip"><b>0</b> 第三方依赖</span>
+      <span class="chip">批量 <b>+</b> 流式</span>
+    </div>
+  </header>
+
+  <div class="cover">
+    <h3>这份文档回答四个问题</h3>
+    <p>数据怎么从传感器流到曲线？模型在算什么？调用方怎么接入？凭什么相信这些数字？</p>
+    <div class="cover-grid">
+      <div class="cover-cell"><div class="n" style="color:#3f5bd9">7</div><div class="l">个处理阶段</div></div>
+      <div class="cover-cell"><div class="n" style="color:#bf4520">2</div><div class="l">个隐状态 S / E</div></div>
+      <div class="cover-cell"><div class="n" style="color:#2c7a4b">64,404</div><div class="l">单元测试断言</div></div>
+      <div class="cover-cell"><div class="n" style="color:#a8650f">9.9e-14</div><div class="l">与 Python 的最大偏差</div></div>
+    </div>
+    <h3>结构</h3>
+    <ol class="cover-toc">
+      <li>输入到输出：一条单向数据流</li>
+      <li>输入契约：哪些必须由外部给</li>
+      <li>能量收支：两个状态，一个充放循环</li>
+      <li>观测与滤波：心率是校正，不是能量</li>
+      <li>两种用法：整段回放，或每五分钟一步</li>
+      <li>生命周期与错误：从不假装“已就绪”</li>
+      <li>性能与验证：数字有出处</li>
+      <li>边界：它不能做什么</li>
+    </ol>
+  </div>
+
+  <nav class="toc">
+    <span>CONTENTS</span>
+    <a href="#flow">1 数据流</a>
+    <a href="#contract">2 输入契约</a>
+    <a href="#model">3 能量收支</a>
+    <a href="#filter">4 观测与滤波</a>
+    <a href="#use">5 两种用法</a>
+    <a href="#life">6 生命周期</a>
+    <a href="#verify">7 性能与验证</a>
+    <a href="#limits">8 边界</a>
+  </nav>
+
+  <!-- 1 -->
+  <section id="flow">
+    <div class="sec-head"><span class="sec-no">01</span><h2>输入到输出：一条单向数据流</h2></div>
+    <div class="rule"></div>
+    <p>整条链路是单向的：观测只通过滤波器反哺状态，不回写模型；离线拟合的参数按天/周批量下发。七个阶段各司其职，任何一个阶段的缺失都在下一阶段被显式标注，而不是被插值掩盖。</p>
+
+    <figure>
+      <div class="fig-head"><span class="fig-no">FIG 1</span><span class="fig-title">采集 → 装配 → 状态 → 校正 → 呈现 → 交付</span></div>
+      <div class="diagram-container">
+        <svg viewBox="0 0 820 940" role="img" aria-labelledby="pipe-title pipe-desc">
+          <title id="pipe-title">能量计算的数据流：原始信号经五 分钟面板、派生量、状态方程与 EKF，最终输出曲线与日汇总</title>
+          <desc id="pipe-desc">七个阶段自上而下：采集五路信号，装配成 5 分钟面板，计算睡眠派生量与负荷活动量，用解析解推进 S/E 状态，用 EKF 由 HR/HRV 校正，再经展示层调制，输出曲线、每日汇总与睡眠报告。</desc>
+          <defs>
+            <marker id="pipe-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#7a7f8c"/></marker>
+            <marker id="pipe-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
+          </defs>
+
+          <rect width="820" height="940" fill="#ffffff"/>
+
+          <!-- stage labels -->
+          <g font-family="'PingFang SC','Microsoft YaHei',sans-serif" font-size="12" fill="#5b6070">
+            <rect x="56" y="116" width="8" height="8" rx="2" fill="#3f5bd9"/><text x="74" y="125">01 采集</text>
+            <rect x="56" y="226" width="8" height="8" rx="2" fill="#6d4fc4"/><text x="74" y="235">02 装配</text>
+            <rect x="56" y="340" width="8" height="8" rx="2" fill="#a8650f"/><text x="74" y="349">03 派生</text>
+            <rect x="56" y="470" width="8" height="8" rx="2" fill="#bf4520"/><text x="74" y="479">04 状态</text>
+            <rect x="56" y="592" width="8" height="8" rx="2" fill="#a83f63"/><text x="74" y="601">05 校正</text>
+            <rect x="56" y="704" width="8" height="8" rx="2" fill="#2c7a4b"/><text x="74" y="713">06 呈现</text>
+            <rect x="56" y="816" width="8" height="8" rx="2" fill="#2c7a4b"/><text x="74" y="825">07 交付</text>
+          </g>
+
+          <!-- arrows first -->
+          <g fill="none" stroke="#7a7f8c" stroke-width="1.2">
+            <path d="M520,154 V196" marker-end="url(#pipe-arrow)"/>
+            <path d="M505,264 V286 H397 V306" marker-end="url(#pipe-arrow)"/>
+            <path d="M535,264 V294 H643 V306" marker-end="url(#pipe-arrow)"/>
+            <path d="M397,382 V426" marker-end="url(#pipe-arrow)"/>
+            <path d="M643,382 V426" marker-end="url(#pipe-arrow)"/>
+            <path d="M520,630 V674" marker-end="url(#pipe-arrow)"/>
+            <path d="M520,742 V786" marker-end="url(#pipe-arrow)"/>
+          </g>
+          <g fill="none" stroke="#bf4520" stroke-width="1.4">
+            <path d="M506,522 V562" marker-end="url(#pipe-arrow-accent)"/>
+          </g>
+          <path d="M546,562 V522" fill="none" stroke="#a83f63" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#pipe-arrow)"/>
+
+          <!-- layer 1 -->
+          <g>
+            <rect x="290" y="86" width="460" height="68" rx="6" fill="#eef1ff" stroke="#3f5bd9"/>
+            <rect x="300" y="94" width="42" height="12" rx="2" fill="none" stroke="#3f5bd9" stroke-opacity=".45" stroke-width=".8"/>
+            <text x="321" y="103" font-family="'SF Mono',Menlo,monospace" font-size="6.5" fill="#3f5bd9" text-anchor="middle" letter-spacing=".08em">INPUT</text>
+            <text x="520" y="116" font-size="14" font-weight="600" fill="#23252f" text-anchor="middle">原始信号</text>
+            <text x="520" y="136" font-size="10" fill="#5b6070" text-anchor="middle">HR 5s · HRV 5–20m · 分期区间 · 步数 15m · 压力评分</text>
+          </g>
+
+          <!-- layer 2 -->
+          <g>
+            <rect x="290" y="196" width="460" height="68" rx="6" fill="#f2eeff" stroke="#6d4fc4"/>
+            <rect x="300" y="204" width="46" height="12" rx="2" fill="none" stroke="#6d4fc4" stroke-opacity=".45" stroke-width=".8"/>
+            <text x="323" y="213" font-family="'SF Mono',Menlo,monospace" font-size="6.5" fill="#6d4fc4" text-anchor="middle" letter-spacing=".08em">PANEL</text>
+            <text x="520" y="226" font-size="14" font-weight="600" fill="#23252f" text-anchor="middle">5 分钟面板</text>
+            <text x="520" y="246" font-size="10" fill="#5b6070" text-anchor="middle">288 点/天 · 缺失 = NaN · 质量位 q ∈ [0,1]</text>
+          </g>
+
+          <!-- layer 3 -->
+          <g>
+            <rect x="290" y="306" width="215" height="76" rx="6" fill="#fbf1e2" stroke="#a8650f"/>
+            <text x="397" y="334" font-size="13" font-weight="600" fill="#23252f" text-anchor="middle">睡眠派生量</text>
+            <text x="397" y="354" font-size="10" fill="#5b6070" text-anchor="middle">m · λ · ψ</text>
+            <text x="397" y="370" font-size="9" fill="#a8650f" text-anchor="middle">Σp · κ · w</text>
+          </g>
+          <g>
+            <rect x="535" y="306" width="215" height="76" rx="6" fill="#fbf1e2" stroke="#a8650f"/>
+            <text x="643" y="334" font-size="13" font-weight="600" fill="#23252f" text-anchor="middle">负荷与活动量</text>
+            <text x="643" y="354" font-size="10" fill="#5b6070" text-anchor="middle">L（进状态） · A（进观测）</text>
+            <text x="643" y="370" font-size="9" fill="#a8650f" text-anchor="middle">exogenous</text>
+          </g>
+
+          <!-- layer 4 -->
+          <g>
+            <rect x="290" y="426" width="460" height="96" rx="6" fill="#fdeee8" stroke="#bf4520" stroke-width="1.4"/>
+            <rect x="300" y="434" width="46" height="12" rx="2" fill="none" stroke="#bf4520" stroke-opacity=".55" stroke-width=".8"/>
+            <text x="323" y="443" font-family="'SF Mono',Menlo,monospace" font-size="6.5" fill="#bf4520" text-anchor="middle" letter-spacing=".08em">CORE</text>
+            <text x="520" y="466" font-size="15" font-weight="600" fill="#23252f" text-anchor="middle">S / E 状态方程</text>
+            <text x="520" y="487" font-size="10" fill="#5b6070" text-anchor="middle">dS/dt = (1−m)κw(1−S) − mλS</text>
+            <text x="520" y="504" font-size="10" fill="#5b6070" text-anchor="middle">dE/dt = α(1−E) − βE · 闭式指数积分 · 恒在 [0,1]</text>
+          </g>
+
+          <!-- layer 5 -->
+          <g>
+            <rect x="290" y="562" width="460" height="68" rx="6" fill="#fbe9ef" stroke="#a83f63"/>
+            <rect x="300" y="570" width="46" height="12" rx="2" fill="none" stroke="#a83f63" stroke-opacity=".45" stroke-width=".8"/>
+            <text x="323" y="579" font-family="'SF Mono',Menlo,monospace" font-size="6.5" fill="#a83f63" text-anchor="middle" letter-spacing=".08em">FILTER</text>
+            <text x="520" y="592" font-size="14" font-weight="600" fill="#23252f" text-anchor="middle">EKF 观测校正</text>
+            <text x="520" y="612" font-size="10" fill="#5b6070" text-anchor="middle">HR / HRV · 稳健 t(ν=4) · 4σ 门控 · Joseph 形式</text>
+          </g>
+
+          <!-- layer 6 -->
+          <g>
+            <rect x="290" y="674" width="460" height="68" rx="6" fill="#e8f4ec" stroke="#2c7a4b"/>
+            <rect x="300" y="682" width="38" height="12" rx="2" fill="none" stroke="#2c7a4b" stroke-opacity=".45" stroke-width=".8"/>
+            <text x="319" y="691" font-family="'SF Mono',Menlo,monospace" font-size="6.5" fill="#2c7a4b" text-anchor="middle" letter-spacing=".08em">VIEW</text>
+            <text x="520" y="704" font-size="14" font-weight="600" fill="#23252f" text-anchor="middle">展示层</text>
+            <text x="520" y="724" font-size="10" fill="#5b6070" text-anchor="middle">±10% 昼夜节律 · 30 min 平滑 · 95% 置信带</text>
+          </g>
+
+          <!-- layer 7 -->
+          <g>
+            <rect x="290" y="786" width="460" height="68" rx="6" fill="#e8f4ec" stroke="#2c7a4b" stroke-width="1.4"/>
+            <rect x="300" y="794" width="34" height="12" rx="2" fill="none" stroke="#2c7a4b" stroke-opacity=".55" stroke-width=".8"/>
+            <text x="317" y="803" font-family="'SF Mono',Menlo,monospace" font-size="6.5" fill="#2c7a4b" text-anchor="middle" letter-spacing=".08em">OUT</text>
+            <text x="520" y="816" font-size="14" font-weight="600" fill="#23252f" text-anchor="middle">输出</text>
+            <text x="520" y="836" font-size="10" fill="#5b6070" text-anchor="middle">energy[0–100] · 每日汇总 · 睡眠报告 · 置信带</text>
+          </g>
+
+          <!-- arrow labels -->
+          <g font-family="'PingFang SC','Microsoft YaHei',sans-serif" font-size="10" fill="#a83f63">
+            <rect x="470" y="528" width="34" height="14" rx="2" fill="#ffffff"/>
+            <text x="487" y="539" text-anchor="middle">预测</text>
+            <rect x="552" y="528" width="34" height="14" rx="2" fill="#ffffff"/>
+            <text x="569" y="539" text-anchor="middle">校正</text>
+          </g>
+
+          <!-- legend -->
+          <line x1="56" y1="884" x2="764" y2="884" stroke="rgba(35,37,47,.12)" stroke-width="1"/>
+          <g font-family="'PingFang SC','Microsoft YaHei',sans-serif" font-size="10" fill="#5b6070">
+            <rect x="64" y="904" width="10" height="10" rx="2" fill="#eef1ff" stroke="#3f5bd9"/><text x="82" y="913">采集</text>
+            <rect x="150" y="904" width="10" height="10" rx="2" fill="#f2eeff" stroke="#6d4fc4"/><text x="168" y="913">装配</text>
+            <rect x="236" y="904" width="10" height="10" rx="2" fill="#fbf1e2" stroke="#a8650f"/><text x="254" y="913">派生</text>
+            <rect x="322" y="904" width="10" height="10" rx="2" fill="#fdeee8" stroke="#bf4520"/><text x="340" y="913">状态（焦点）</text>
+            <rect x="452" y="904" width="10" height="10" rx="2" fill="#fbe9ef" stroke="#a83f63"/><text x="470" y="913">滤波校正</text>
+            <rect x="570" y="904" width="10" height="10" rx="2" fill="#e8f4ec" stroke="#2c7a4b"/><text x="588" y="913">呈现与交付</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>FIG 1 · 单向数据流。箭头方向即依赖方向；状态与滤波之间的“预测 / 校正”是唯一的回环。</figcaption>
+    </figure>
+
+    <div class="stats">
+      <div class="stat i"><div class="n">5</div><div class="l">路原始信号</div></div>
+      <div class="stat t"><div class="n">288</div><div class="l">点 / 天（5 分钟）</div></div>
+      <div class="stat g"><div class="n">2</div><div class="l">个隐状态（S, E）</div></div>
+      <div class="stat a"><div class="n">4.5 µs</div><div class="l">每点计算（-O2）</div></div>
+    </div>
+  </section>
+
+  <!-- 2 -->
+  <section id="contract">
+    <div class="sec-head"><span class="sec-no">02</span><h2>输入契约：哪些必须由外部给</h2></div>
+    <div class="rule"></div>
+    <p>只有 <code class="inl">t_h</code> 是绝对必须。<code class="inl">stage</code> 与 <code class="inl">hr</code> 决定“这是不是一个能量模型”：没有分期，夜里不充电；没有心率，滤波器退化为开环。其余字段都有默认值或由库内部计算。</p>
+
+    <table>
+      <thead><tr><th style="width:110px">档位</th><th style="width:180px">字段</th><th>作用</th><th style="width:300px">不传时</th></tr></thead>
+      <tbody>
+        <tr><td><span class="dot" style="background:#3f5bd9"></span>必须</td><td><code>t_h</code></td><td>时间轴，严格递增</td><td>无法计算</td></tr>
+        <tr><td><span class="dot" style="background:#3f5bd9"></span>必须</td><td><code>stage[4]</code></td><td>睡眠分期 → m / λ / ψ，决定夜里充多快</td><td>m=0，全程清醒：07:00 的 E 从 0.71 掉到 0.37</td></tr>
+        <tr><td><span class="dot" style="background:#3f5bd9"></span>必须</td><td><code>hr</code></td><td>主观测通道 + 负荷 TRIMP</td><td>退化为开环，只剩先验，置信带宽 = 0</td></tr>
+        <tr><td><span class="dot" style="background:#a8650f"></span>建议</td><td><code>hrv_log</code></td><td>第二观测通道（夜间信息最大）</td><td>只剩 HR 校正</td></tr>
+        <tr><td><span class="dot" style="background:#a8650f"></span>建议</td><td><code>steps_5m</code></td><td>负荷 L 与活动量 A 的主要来源</td><td>L 只由 HR 算；HR 也缺则 L=0</td></tr>
+        <tr><td><span class="dot" style="background:#a8650f"></span>建议</td><td><code>stress</code></td><td>β_P 消耗项（满量程 ≈ 3×β0）</td><td>少一项消耗，能量略偏高</td></tr>
+        <tr><td><span class="dot" style="background:#a8650f"></span>建议</td><td><code>tod</code></td><td>节律、日间观测窗口、基线分箱</td><td>按 t_h % 24 推断；起点非 00:00 会错位</td></tr>
+        <tr><td><span class="dot" style="background:#a8650f"></span>建议</td><td><code>q_hr / q_hrv</code></td><td>伪迹、摘表时关掉该点</td><td>默认 1（全部相信）：+6 bpm 偏差可把 E 拉偏 0.36</td></tr>
+        <tr><td><span class="dot" style="background:#2c7a4b"></span>可选</td><td><code>kcal</code></td><td>只影响活动量 A</td><td>A 只由步数算</td></tr>
+        <tr><td><span class="dot" style="background:#2c7a4b"></span>可选</td><td><code>load / activity</code></td><td>上游已算好时直接传</td><td>库内部按固定规则计算</td></tr>
+      </tbody>
+    </table>
+
+    <div class="note"><b>初始化用 <code class="inl">energy_sample_init()</code>，不要 memset(0)。</b> 0 会把 <code>q</code> 当成“无效观测”而跳过滤波，把 <code>hr</code> 当成 0 bpm。</div>
+
+    <div class="cols">
+      <div class="card">
+        <h4><span class="dot" style="background:#bf4520"></span>配置层比字段更影响质量</h4>
+        <ul>
+          <li><code>cfg.obs</code>：离线拟合的观测模型（最重要）</li>
+          <li><code>cfg.params</code>：个体化状态参数</li>
+          <li><code>cfg.load.l_ref</code>：用户画像固定值，跨窗口可比</li>
+          <li><code>cfg.x0</code>：接续计算时传上次末状态</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4><span class="dot" style="background:#2c7a4b"></span>三个最常见的集成错误</h4>
+        <ul>
+          <li>把 <code>hrv_log</code> 填成毫秒（45 而不是 3.81）</li>
+          <li>白天把 <code>stage[wake]</code> 设成 1（会走夜间方程）</li>
+          <li>一半字段传、一半让库算（归一化路径不同）</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 -->
+  <section id="model">
+    <div class="sec-head"><span class="sec-no">03</span><h2>能量收支：两个状态，一个充放循环</h2></div>
+    <div class="rule"></div>
+    <p>能量 E 不是被“测量”出来的，而是由睡眠充电与清醒消耗共同推出来的。睡眠结构决定充电效率，活动与压力决定放电速度；S（睡眠压力）既是充电的驱动，也是白天的额外消耗。</p>
+
+    <figure>
+      <div class="fig-head"><span class="fig-no">FIG 2</span><span class="fig-title">E 的收支结构：α 充电、β 消耗、S 同时作用于两端</span></div>
+      <div class="diagram-container">
+        <svg viewBox="0 0 1000 560" role="img" aria-labelledby="bal-title bal-desc">
+          <title id="bal-title">能量收支：睡眠结构、睡眠压力与基础速率构成充电项，基础代谢、活动、压力与睡眠债构成消耗项</title>
+          <desc id="bal-desc">图中央是能量储备 E，左侧充电项 α 由分期恢复权重、睡眠压力 φ(S) 与睡眠基础速率组成，右侧消耗项 β 由基础消耗、活动负荷、压力评分与睡眠债组成；下方的 S 通过 φ(S) 和 βS 同时影响两侧。</desc>
+          <defs>
+            <marker id="bal-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#7a7f8c"/></marker>
+            <marker id="bal-arrow-teal" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#0e7a83"/></marker>
+            <marker id="bal-arrow-rose" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#a83f63"/></marker>
+          </defs>
+          <rect width="1000" height="560" fill="#ffffff"/>
+
+          <!-- arrows -->
+          <path d="M350,230 H430" fill="none" stroke="#0e7a83" stroke-width="2" marker-end="url(#bal-arrow-teal)"/>
+          <path d="M600,230 H700" fill="none" stroke="#a83f63" stroke-width="2" marker-end="url(#bal-arrow-rose)"/>
+          <path d="M425,420 V360 H300 V300" fill="none" stroke="#6d4fc4" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#bal-arrow)"/>
+          <path d="M520,452 H820 V350" fill="none" stroke="#6d4fc4" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#bal-arrow)"/>
+
+          <!-- charging -->
+          <rect x="110" y="140" width="240" height="160" rx="6" fill="#e6f4f5" stroke="#0e7a83"/>
+          <text x="230" y="172" font-size="14" font-weight="600" fill="#23252f" text-anchor="middle">充电 α</text>
+          <text x="230" y="204" font-size="11" fill="#2e3140" text-anchor="middle">ψ　分期恢复权重</text>
+          <text x="230" y="230" font-size="11" fill="#2e3140" text-anchor="middle">φ(S)　越困充得越快</text>
+          <text x="230" y="256" font-size="11" fill="#2e3140" text-anchor="middle">α_sleep　睡眠基础速率</text>
+          <text x="230" y="282" font-size="9" fill="#0e7a83" text-anchor="middle" font-family="'SF Mono',Menlo,monospace">α = (1−m)α_rest + m α_sleep φ ψ</text>
+
+          <!-- E -->
+          <rect x="430" y="185" width="170" height="90" rx="6" fill="#fdeee8" stroke="#bf4520" stroke-width="1.6"/>
+          <text x="515" y="220" font-size="15" font-weight="600" fill="#23252f" text-anchor="middle">E 能量储备</text>
+          <text x="515" y="242" font-size="11" fill="#5b6070" text-anchor="middle">0–100 分</text>
+          <text x="515" y="262" font-size="9" fill="#bf4520" text-anchor="middle" font-family="'SF Mono',Menlo,monospace">dE/dt = α(1−E) − βE</text>
+
+          <!-- draining -->
+          <rect x="700" y="120" width="250" height="230" rx="6" fill="#fbe9ef" stroke="#a83f63"/>
+          <text x="825" y="152" font-size="14" font-weight="600" fill="#23252f" text-anchor="middle">消耗 β</text>
+          <text x="825" y="184" font-size="11" fill="#2e3140" text-anchor="middle">β0　基础代谢</text>
+          <text x="825" y="210" font-size="11" fill="#2e3140" text-anchor="middle">βL·L　活动负荷</text>
+          <text x="825" y="236" font-size="11" fill="#2e3140" text-anchor="middle">βP·P　压力评分</text>
+          <text x="825" y="262" font-size="11" fill="#2e3140" text-anchor="middle">βS·S　睡眠债</text>
+          <text x="825" y="292" font-size="9" fill="#a83f63" text-anchor="middle" font-family="'SF Mono',Menlo,monospace">β = β0 + βL·L + βP·P + (1−m)βS·S</text>
+
+          <!-- S -->
+          <rect x="330" y="420" width="190" height="64" rx="6" fill="#f2eeff" stroke="#6d4fc4"/>
+          <text x="425" y="446" font-size="13" font-weight="600" fill="#23252f" text-anchor="middle">S 睡眠压力</text>
+          <text x="425" y="466" font-size="10" fill="#5b6070" text-anchor="middle">0–1，越醒越高</text>
+
+          <!-- labels -->
+          <g font-size="10" fill="#5b6070" font-family="'PingFang SC','Microsoft YaHei',sans-serif">
+            <rect x="366" y="206" width="44" height="14" rx="2" fill="#ffffff"/>
+            <text x="388" y="217" text-anchor="middle" fill="#0e7a83">充入</text>
+            <rect x="630" y="206" width="44" height="14" rx="2" fill="#ffffff"/>
+            <text x="652" y="217" text-anchor="middle" fill="#a83f63">消耗</text>
+            <rect x="312" y="338" width="54" height="14" rx="2" fill="#ffffff"/>
+            <text x="339" y="349" text-anchor="middle" fill="#6d4fc4">φ(S)</text>
+            <rect x="676" y="430" width="54" height="14" rx="2" fill="#ffffff"/>
+            <text x="703" y="441" text-anchor="middle" fill="#6d4fc4">βS·S</text>
+          </g>
+
+          <!-- legend -->
+          <line x1="56" y1="512" x2="944" y2="512" stroke="rgba(35,37,47,.12)" stroke-width="1"/>
+          <g font-size="10" fill="#5b6070" font-family="'PingFang SC','Microsoft YaHei',sans-serif">
+            <rect x="64" y="528" width="10" height="10" rx="2" fill="#e6f4f5" stroke="#0e7a83"/><text x="82" y="537">充电项</text>
+            <rect x="150" y="528" width="10" height="10" rx="2" fill="#fdeee8" stroke="#bf4520"/><text x="168" y="537">状态（焦点）</text>
+            <rect x="274" y="528" width="10" height="10" rx="2" fill="#fbe9ef" stroke="#a83f63"/><text x="292" y="537">消耗项</text>
+            <rect x="366" y="528" width="10" height="10" rx="2" fill="#f2eeff" stroke="#6d4fc4"/><text x="384" y="537">睡眠压力 S</text>
+            <text x="490" y="537" fill="#71768a">虚线 = S 通过 φ(S) 与 βS 同时影响充电与消耗</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>FIG 2 · 充电与消耗都不含隐藏项：每一分能量的进出都能追到某个系数与某路输入。</figcaption>
+    </figure>
+
+    <p>把两段方程合起来就是一个有界系统：<code class="inl">S</code> 的向量场永远指向 [0,1] 内部，<code class="inl">E</code> 的平衡点 <code class="inl">α/(α+β)</code> 也落在 [0,1]。因此实现里不需要“事后截断”，只有滤波器更新后的一次数值保护。</p>
+
+    <pre><span class="c">/* 单步闭式推进（不是欧拉法） */</span>
+S∞ = a / b;            S(t+h) = S∞ + (S − S∞) · e^(−b·h)
+E∞ = α / (α + β);      E(t+h) = E∞ + (E − E∞) · e^(−(α+β)·h)</pre>
+
+    <h3>参数：先验、推导与拟合</h3>
+    <table>
+      <thead><tr><th>参数</th><th>默认</th><th>依据</th><th style="width:90px">证据强度</th></tr></thead>
+      <tbody>
+        <tr><td><code>κ_w</code></td><td>0.100 /h</td><td>由“清醒 16 h 后 S≈0.80”反解：−ln(0.2)/16</td><td><span class="dot" style="background:#2c7a4b"></span>强（推导）</td></tr>
+        <tr><td><code>κ_s</code> deep/light/rem</td><td>0.42 / 0.26 / 0.18</td><td>深睡消散最快，τ = 2.4 / 3.8 / 5.6 h；只约束序关系</td><td><span class="dot" style="background:#a8650f"></span>弱</td></tr>
+        <tr><td><code>α_sleep</code></td><td>0.300 /h</td><td>睡眠充电 τ≈3.2 h；MAP 估到 0.45（数据偏好更快）</td><td><span class="dot" style="background:#a8650f"></span>中</td></tr>
+        <tr><td><code>β_L / β_P / β_S</code></td><td>0.150 / 0.030 / 0.035</td><td>活动 ≫ 压力 ≈ 睡眠债 ≫ 基础消耗</td><td><span class="dot" style="background:#a8650f"></span>中</td></tr>
+        <tr><td><code>η</code></td><td>0.60</td><td>φ(S) 次线性；与 κ_s.light 相关 0.997，只能当形状参数</td><td><span class="dot" style="background:#a83f63"></span>弱</td></tr>
+      </tbody>
+    </table>
+    <div class="note warn"><b>不要把单个参数当“个人恢复能力”展示。</b> 11 个参数里只有 5 个有清晰剖面峰；其余是平坦方向。要展示的是它们组合出的可观测量：充电 τ、消耗 τ、8 小时睡眠的 ΔE。</div>
+  </section>
+
+  <!-- 4 -->
+  <section id="filter">
+    <div class="sec-head"><span class="sec-no">04</span><h2>观测与滤波：心率是校正，不是能量</h2></div>
+    <div class="rule"></div>
+    <p>HR/HRV 不直接变成能量。它们是“身体对当前状态的反应”，通过夜间与日间两套线性观测方程，进入一个 2×2 的扩展卡尔曼滤波。一次更新只移动一点点——平均增益约 1e-3，所以曲线主要由状态方程决定。</p>
+
+    <table>
+      <thead><tr><th style="width:120px">通道</th><th>夜间方程</th><th>日间方程</th></tr></thead>
+      <tbody>
+        <tr><td><code>HR</code></td><td>58 − 12·E − 5·p_deep + 2·p_rem + 9·p_wake</td><td>80 − 12·E + 105·A + 谐波</td></tr>
+        <tr><td><code>ln RMSSD</code></td><td>3.55 + 0.45·E + 0.30·p_deep + 0.18·p_rem − 0.35·p_wake</td><td>3.25 + 0.45·E − 0.55·A + 谐波</td></tr>
+      </tbody>
+    </table>
+
+    <div class="cols">
+      <div class="card"><h4><span class="dot" style="background:#a83f63"></span>四道稳健化</h4>
+        <ul>
+          <li>Student-t(ν=4)：大新息自动降权</li>
+          <li>4σ 门控：单点伪迹不参与更新</li>
+          <li>质量位 q：R = σ² / max(q, 0.05)</li>
+          <li>Joseph 形式：长期运行协方差不发散</li>
+        </ul>
+      </div>
+      <div class="card"><h4><span class="dot" style="background:#3f5bd9"></span>一个必须知道的脆弱点</h4>
+        <ul>
+          <li>持续性心率偏移（+9 bpm）会被当成“能量低”</li>
+          <li>4σ 门控挡不住：它只看单点</li>
+          <li>对策：异常夜冻结观测（q=0）后重跑</li>
+          <li>不做这一步，测试段 RMSE 从 0.045 升到 0.13</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 -->
+  <section id="use">
+    <div class="sec-head"><span class="sec-no">05</span><h2>两种用法：整段回放，或每五分钟一步</h2></div>
+    <div class="rule"></div>
+    <p>批量接口适合离线回放、补数据与回归测试；流式接口适合在线设备。两者共用同一套子函数，状态逐点一致——差别只在流式不做展示层的 30 分钟居中平滑。</p>
+
+    <figure>
+      <div class="fig-head"><span class="fig-no">FIG 3</span><span class="fig-title">流式调用时序：一次 step 内的两次内部更新</span></div>
+      <div class="diagram-container">
+        <svg viewBox="0 0 1020 520" role="img" aria-labelledby="seq-title seq-desc">
+          <title id="seq-title">流式调用时序：上游样本进入调用方，调用方每次传入 energy_ctx_step，库内完成预测与观测更新后返回能量点</title>
+          <desc id="seq-desc">四条泳道依次为上游数据、调用方、energy_ctx 与存储展示；调用方收到五分钟样本后调用 energy_ctx_step，库内先做解析推进再做观测更新，返回 energy_point_t，调用方落库或展示。</desc>
+          <defs>
+            <marker id="seq-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#7a7f8c"/></marker>
+            <marker id="seq-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
+            <marker id="seq-arrow-green" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2c7a4b"/></marker>
+            <marker id="seq-arrow-rose" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#a83f63"/></marker>
+          </defs>
+          <rect width="1020" height="520" fill="#ffffff"/>
+
+          <!-- lifelines -->
+          <g stroke="#c9c6bf" stroke-width="1" stroke-dasharray="4,4">
+            <line x1="170" y1="104" x2="170" y2="470"/>
+            <line x1="420" y1="104" x2="420" y2="470"/>
+            <line x1="670" y1="104" x2="670" y2="470"/>
+            <line x1="880" y1="104" x2="880" y2="470"/>
+          </g>
+
+          <!-- headers -->
+          <g>
+            <rect x="70" y="52" width="200" height="48" rx="6" fill="#eef1ff" stroke="#3f5bd9"/>
+            <text x="170" y="72" font-size="12.5" font-weight="600" fill="#23252f" text-anchor="middle">上游数据</text>
+            <text x="170" y="89" font-size="9" fill="#5b6070" text-anchor="middle">戒指 / 云端同步</text>
+
+            <rect x="320" y="52" width="200" height="48" rx="6" fill="#fbf1e2" stroke="#a8650f"/>
+            <text x="420" y="72" font-size="12.5" font-weight="600" fill="#23252f" text-anchor="middle">调用方</text>
+            <text x="420" y="89" font-size="9" fill="#5b6070" text-anchor="middle">App / 服务</text>
+
+            <rect x="565" y="52" width="210" height="48" rx="6" fill="#fdeee8" stroke="#bf4520" stroke-width="1.4"/>
+            <text x="670" y="72" font-size="12.5" font-weight="600" fill="#23252f" text-anchor="middle">energy_ctx_t</text>
+            <text x="670" y="89" font-size="9" fill="#5b6070" text-anchor="middle">libenergy · 无全局状态</text>
+
+            <rect x="775" y="52" width="210" height="48" rx="6" fill="#e8f4ec" stroke="#2c7a4b"/>
+            <text x="880" y="72" font-size="12.5" font-weight="600" fill="#23252f" text-anchor="middle">存储 / UI</text>
+            <text x="880" y="89" font-size="9" fill="#5b6070" text-anchor="middle">曲线 · 日汇总</text>
+          </g>
+
+          <!-- activation -->
+          <rect x="663" y="196" width="14" height="172" rx="3" fill="#fdeee8" stroke="#bf4520" stroke-opacity=".35"/>
+
+          <!-- messages -->
+          <g stroke-linecap="round">
+            <line x1="170" y1="150" x2="412" y2="150" stroke="#7a7f8c" stroke-width="1.2" marker-end="url(#seq-arrow)"/>
+            <line x1="420" y1="205" x2="655" y2="205" stroke="#bf4520" stroke-width="1.6" marker-end="url(#seq-arrow-accent)"/>
+            <line x1="662" y1="372" x2="428" y2="372" stroke="#2c7a4b" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#seq-arrow-green)"/>
+            <line x1="420" y1="430" x2="872" y2="430" stroke="#7a7f8c" stroke-width="1.2" marker-end="url(#seq-arrow)"/>
+          </g>
+
+          <!-- self messages -->
+          <path d="M677,260 H730 V282 H679" fill="none" stroke="#a83f63" stroke-width="1.2" marker-end="url(#seq-arrow-rose)"/>
+          <path d="M677,318 H730 V340 H679" fill="none" stroke="#a83f63" stroke-width="1.2" marker-end="url(#seq-arrow-rose)"/>
+
+          <!-- labels -->
+          <g font-size="10.5" fill="#2e3140" font-family="'PingFang SC','Microsoft YaHei',sans-serif">
+            <rect x="248" y="128" width="86" height="14" rx="2" fill="#ffffff"/>
+            <text x="291" y="139" text-anchor="middle">5 分钟样本</text>
+
+            <rect x="470" y="187" width="120" height="14" rx="2" fill="#ffffff"/>
+            <text x="530" y="198" text-anchor="middle" fill="#bf4520">energy_ctx_step()</text>
+
+            <rect x="740" y="252" width="76" height="14" rx="2" fill="#ffffff"/>
+            <text x="778" y="263" fill="#a83f63">解析推进</text>
+
+            <rect x="740" y="310" width="76" height="14" rx="2" fill="#ffffff"/>
+            <text x="778" y="321" fill="#a83f63">观测更新</text>
+
+            <rect x="468" y="354" width="146" height="14" rx="2" fill="#ffffff"/>
+            <text x="541" y="365" fill="#2c7a4b">energy_point_t</text>
+
+            <rect x="576" y="410" width="92" height="14" rx="2" fill="#ffffff"/>
+            <text x="622" y="421" fill="#5b6070">落库 / 展示</text>
+          </g>
+
+          <text x="70" y="490" font-size="10" fill="#71768a" font-family="'PingFang SC','Microsoft YaHei',sans-serif">单次 step 约 3 µs（-O2，单核）；库内不分配内存，可放在中断之外的任务循环里。</text>
+        </svg>
+      </div>
+      <figcaption>FIG 3 · 一次 step = 一次预测 + 两次串行观测更新（HR、HRV）。观测缺失时只预测，置信带变宽。</figcaption>
+    </figure>
+
+    <pre><span class="c">/* 批量：整段回放，出曲线 + 日汇总 */</span>
+energy_output_t out = {0};
+energy_compute(samples, n, &amp;cfg, &amp;out);
+printf(<span class="s">"%.1f"</span>, out.points[i].energy);
+energy_output_free(&amp;out);
+
+<span class="c">/* 流式：每 5 分钟一步，状态在调用方手里 */</span>
+energy_ctx_t ctx;  energy_ctx_init(&amp;ctx, &amp;cfg);
+energy_point_t p;
+energy_ctx_step(&amp;ctx, &amp;sample, &amp;p);   <span class="c">/* p.energy = 0–100 */</span></pre>
+  </section>
+
+  <!-- 6 -->
+  <section id="life">
+    <div class="sec-head"><span class="sec-no">06</span><h2>生命周期与错误：从不假装“已就绪”</h2></div>
+    <div class="rule"></div>
+    <p>冷启动时初始协方差故意放大，让前几次观测能把状态拉到位；数据中断时只做预测，置信带变宽；极长缺口让协方差失去意义时，自动回到冷启动方差，而不是永久失聪。</p>
+
+    <figure>
+      <div class="fig-head"><span class="fig-no">FIG 4</span><span class="fig-title">运行状态机：冷启动、稳定运行、降级与复位</span></div>
+      <div class="diagram-container">
+        <svg viewBox="0 0 1000 420" role="img" aria-labelledby="life-title life-desc">
+          <title id="life-title">能量滤波器生命周期：初始化、冷启动、稳定运行与降级缺数据之间的转换</title>
+          <desc id="life-desc">四个状态依次为初始化、冷启动、稳定运行与降级；冷启动在积累足够观测后进入运行，运行在观测缺失时进入降级，降级在观测恢复后回到运行，长缺口或协方差失效时回到冷启动。</desc>
+          <defs>
+            <marker id="life-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#7a7f8c"/></marker>
+          </defs>
+          <rect width="1000" height="420" fill="#ffffff"/>
+
+          <!-- transitions -->
+          <g fill="none" stroke="#7a7f8c" stroke-width="1.2">
+            <path d="M220,210 H290" marker-end="url(#life-arrow)"/>
+            <path d="M440,210 H510" marker-end="url(#life-arrow)"/>
+            <path d="M660,210 H730" marker-end="url(#life-arrow)"/>
+          </g>
+          <path d="M805,180 V130 H585 V180" fill="none" stroke="#2c7a4b" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#life-arrow)"/>
+          <path d="M585,240 V300 H365 V240" fill="none" stroke="#a83f63" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#life-arrow)"/>
+
+          <!-- states -->
+          <g>
+            <rect x="70" y="180" width="150" height="60" rx="6" fill="#eef1ff" stroke="#3f5bd9"/>
+            <text x="145" y="206" font-size="13" font-weight="600" fill="#23252f" text-anchor="middle">初始化</text>
+            <text x="145" y="224" font-size="9" fill="#5b6070" text-anchor="middle">energy_ctx_init()</text>
+
+            <rect x="290" y="180" width="150" height="60" rx="6" fill="#fbf1e2" stroke="#a8650f"/>
+            <text x="365" y="206" font-size="13" font-weight="600" fill="#23252f" text-anchor="middle">冷启动</text>
+            <text x="365" y="224" font-size="9" fill="#5b6070" text-anchor="middle">P0 放大 · 前几次观测</text>
+
+            <rect x="510" y="180" width="150" height="60" rx="6" fill="#e8f4ec" stroke="#2c7a4b" stroke-width="1.4"/>
+            <text x="585" y="206" font-size="13" font-weight="600" fill="#23252f" text-anchor="middle">稳定运行</text>
+            <text x="585" y="224" font-size="9" fill="#5b6070" text-anchor="middle">逐点预测 + 校正</text>
+
+            <rect x="730" y="180" width="150" height="60" rx="6" fill="#fbe9ef" stroke="#a83f63"/>
+            <text x="805" y="206" font-size="13" font-weight="600" fill="#23252f" text-anchor="middle">降级 · 缺数据</text>
+            <text x="805" y="224" font-size="9" fill="#5b6070" text-anchor="middle">只预测 · 带宽变宽</text>
+          </g>
+
+          <!-- guards -->
+          <g font-size="10" fill="#5b6070" font-family="'PingFang SC','Microsoft YaHei',sans-serif">
+            <rect x="228" y="188" width="54" height="14" rx="2" fill="#ffffff"/>
+            <text x="255" y="199" text-anchor="middle">init()</text>
+
+            <rect x="456" y="188" width="44" height="14" rx="2" fill="#ffffff"/>
+            <text x="478" y="199" text-anchor="middle">N 次</text>
+
+            <rect x="672" y="188" width="44" height="14" rx="2" fill="#ffffff"/>
+            <text x="694" y="199" text-anchor="middle">q=0</text>
+
+            <rect x="660" y="104" width="70" height="14" rx="2" fill="#ffffff"/>
+            <text x="695" y="115" text-anchor="middle" fill="#2c7a4b">观测恢复</text>
+
+            <rect x="424" y="280" width="108" height="14" rx="2" fill="#ffffff"/>
+            <text x="478" y="291" text-anchor="middle" fill="#a83f63">长缺口 / P 失效</text>
+          </g>
+
+          <text x="70" y="372" font-size="10" fill="#71768a" font-family="'PingFang SC','Microsoft YaHei',sans-serif">配置非法时不会进入状态机：ctx.config_error=1，之后每次 step 返回 ENERGY_EINVAL。</text>
+        </svg>
+      </div>
+      <figcaption>FIG 4 · 状态机只描述“数据质量”，不描述“用户健康状态”。</figcaption>
+    </figure>
+
+    <table>
+      <thead><tr><th style="width:150px">返回码</th><th>触发条件</th><th>调用方该做什么</th></tr></thead>
+      <tbody>
+        <tr><td><code>ENERGY_OK</code></td><td>正常</td><td>使用 <code>point.energy</code></td></tr>
+        <tr><td><code>ENERGY_EINVAL</code></td><td>空指针、n&lt;2、配置非法、t_h 非有限</td><td>修参数/配置，不要重试</td></tr>
+        <tr><td><code>ENERGY_EDOMAIN</code></td><td>时间不递增、单次 step 时间倒退</td><td>检查排序与时间源</td></tr>
+        <tr><td><code>ENERGY_ENOMEM</code></td><td>批量接口分配失败</td><td>减少窗口或稍后重试</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- 7 -->
+  <section id="verify">
+    <div class="sec-head"><span class="sec-no">07</span><h2>性能与验证：数字有出处</h2></div>
+    <div class="rule"></div>
+    <p>所有数字都来自仓库里的可复现命令：<code class="inl">make test</code>、<code class="inl">make sanitize</code>、<code class="inl">python scripts/check_parity.py 21</code>。与 Python 参考实现的对照是逐点的，不是“看起来差不多”。</p>
+
+    <div class="stats">
+      <div class="stat g"><div class="n">64,404</div><div class="l">单元测试断言</div></div>
+      <div class="stat t"><div class="n">89.0%</div><div class="l">行覆盖率（gcov）</div></div>
+      <div class="stat i"><div class="n">9.9e-14</div><div class="l">与 Python 的最大能量偏差</div></div>
+      <div class="stat a"><div class="n">26 ms</div><div class="l">21 天 6048 点（批量）</div></div>
+    </div>
+
+    <table>
+      <thead><tr><th>路径</th><th>21 天 / 6048 点</th><th>每点</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>批量 <code>energy_compute</code></td><td>26 ms</td><td>4.3 µs</td><td>含负荷标定、EKF、展示、日汇总</td></tr>
+        <tr><td>流式 <code>energy_ctx_step</code></td><td>18 ms</td><td>3.0 µs</td><td>无 malloc，栈帧 432 B</td></tr>
+        <tr><td>Python 参考实现</td><td>762 ms</td><td>—</td><td>同数据、同参数，约 28×</td></tr>
+      </tbody>
+    </table>
+
+    <div class="note"><b>对照口径：</b>同一份 21 天合成数据、同一组参数与观测模型、同样的过程噪声；EKF 与开环两条路径都比对。残差来自 CSV 往返的十进制舍入。</div>
+  </section>
+
+  <!-- 8 -->
+  <section id="limits">
+    <div class="sec-head"><span class="sec-no">08</span><h2>边界：它不能做什么</h2></div>
+    <div class="rule"></div>
+    <div class="cols">
+      <div class="card"><h4><span class="dot" style="background:#a83f63"></span>没做的</h4>
+        <ul>
+          <li>异常夜冻结与二次回放（上层编排）</li>
+          <li>睡眠 episode 报告与冷启动文案</li>
+          <li>离线拟合（用 Python 端产出 fit.json）</li>
+          <li>医学诊断、疾病预警、感染预测</li>
+        </ul>
+      </div>
+      <div class="card"><h4><span class="dot" style="background:#a8650f"></span>需要外部验证的</h4>
+        <ul>
+          <li>0–100 刻度与用户主观能量的对应</li>
+          <li>参数个体化是否带来样本外增益</li>
+          <li>不同设备基线下的观测量偏移</li>
+          <li>轮班、时差、女性周期、药物影响</li>
+        </ul>
+      </div>
+    </div>
+    <div class="note hot"><b>一句话：</b>它是一条“有结构、有边界、缺数据也能解释”的模型曲线，不是身体电量的测量值。产品文案不能写成“测量/诊断”。</div>
+  </section>
+
+  <footer>
+    <span>energy-state-c v1.1.1 · C99 · 单头文件 · 无第三方依赖</span>
+    <span>技术说明 · 图表基于真实实现与实测数据</span>
+  </footer>
+</div>
+</body>
+</html>
