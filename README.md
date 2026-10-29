@@ -7,7 +7,9 @@ Python 参考实现（ring_personal_agent 仓库的 `energy/`，energy-state v1.
 输入（5 分钟面板） → 负荷 L / 活动量 A → 解析 ODE 推进 → EKF 用 HR/HRV 校正 → 0–100 曲线 + 置信带 + 每日汇总
 ```
 
-v1.1.1（修复批量接口忽略调用方 `load`/`activity` 的 bug；v1.1.0 新增 `energy_hrv_log_from_ms()`；v1.0.1 修复流式自动活动量未写回观测方程）。与 Python 的数值一致性：**逐点最大偏差 1e-13**（21 天、6048 点，EKF 与开环两条路径都验证过）。
+**v1.2.0：个体化观测模型**——能量只跟自己比。观测方程的截距不再是群体常数（夜间 58 bpm），而是从这个人自己的数据学到的个人基线（夜间/日间 HR 与 ln(RMSSD)，冷启动 + EWMA 平滑更新），所以心率整体高或低（体质差异）进基线、不进能量；只有"比你平时高/低"才会改变能量。同时修复日间观测方程失真、流式负荷默认值、OOM double free、压力量纲、未佩戴、缺口后负荷冲顶等问题（见 §5.1 与 §13）。v1.2 起 C 实现领先 Python 参考实现，§7 的逐点一致性只对 `cfg.baseline.enable=0` 的 v1.1 对照路径有意义。
+
+历史：v1.1.1（修复批量接口忽略调用方 `load`/`activity` 的 bug；v1.1.0 新增 `energy_hrv_log_from_ms()`；v1.0.1 修复流式自动活动量未写回观测方程）。与 Python 的数值一致性：**逐点最大偏差 1e-13**（21 天、6048 点，EKF 与开环两条路径都验证过）。
 
 ---
 
@@ -71,8 +73,8 @@ scripts/check_parity.py 一键：生成 → 跑 C → 比较
 
 ```bash
 make                 # 生成 build/energy_cli、build/test_energy、build/stream_demo
-make test            # 单元测试（61800 个断言）
-make sanitize        # AddressSanitizer + UBSan
+make test            # 单元测试（81794 个断言）
+make sanitize        # AddressSanitizer + UBSan（受限沙箱/ptrace 下见下方说明）
 make coverage        # gcov 行覆盖率
 make bench           # 纯计算性能
 make example         # 流式示例
@@ -82,7 +84,14 @@ make check           # 单测 + 与 Python 的对照（需要 Python 环境）
 ./build/energy_cli data/sample_panel.csv --load-stats    # 只打印 hr_rest/hr_max/l_ref
 ```
 
-要求：C99 编译器 + libm。已在 Apple clang 21 / `-Wall -Wextra -Wpedantic -Wconversion` 下零告警。
+要求：C99 编译器 + libm。Makefile 默认带 `-D_DEFAULT_SOURCE`（Linux/glibc 下 `-std=c99` 会隐藏 `M_PI` 等定义，v1.1 在 gcc 下无法编译）。
+v1.2 已在 Linux gcc `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror` 下零告警；Apple clang 未在 v1.2 上复测。
+
+在不允许 ptrace / 固定 ASLR 的容器里，LeakSanitizer 会直接报错退出（环境问题），可这样跑：
+
+```bash
+make sanitize SAN_RUN="setarch $(uname -m) -R" ASAN_OPTIONS=detect_leaks=0   # 泄漏另用 valgrind 检查
+```
 
 ## 3. API
 
@@ -156,7 +165,7 @@ char err[128];
 if (energy_config_validate(&cfg, err, sizeof(err)) != ENERGY_OK)
     fprintf(stderr, "配置非法: %s\n", err);
 
-printf("energy-state-c %s\n", energy_version());   /* "1.0.0" */
+printf("energy-state-c %s\n", energy_version());   /* "1.2.0" */
 ```
 
 `energy_compute` 会自动校验（非法配置返回 `ENERGY_EINVAL`）；
@@ -207,10 +216,12 @@ s.steps = ...; s.stress = ...;
 - **`load`（负荷 L）**：进状态方程的消耗项 `β = β₀ + β_L·L + β_P·stress + (1−m)·β_S·S`，
   是白天掉电快慢的主因（实测 L=0 与 L=0.6 的日均能量差 14 分）。不传时由库用
   `心率 TRIMP + 步数 + 心率超基线` 算，再按 P99.5 归一化；流式接口没有全局标定，
-  会用 `cfg.load` 里的 `hr_rest/hr_max/l_ref`（默认 60/185/0.25），
-  **生产环境应把 `l_ref` 固定成用户画像里的值**，否则不同窗口不可比。
+  v1.1 会用固定的 60/185/0.25，导致未填画像时流式与批量差异巨大（同一时刻 0.944 vs 0.124）。
+  v1.2 起流式在线标定 `hr_rest/hr_max/l_ref/hr_base`（与批量同一套规则的在线版本），未填画像时流式与批量
+  基本一致（实测久坐 L：批量 .041 / 流式 .068）；超过 `gap.max_hold_h` 的缺口后负荷不再沿用，不会冲顶。
+  **生产环境仍应把 `energy_load_calibrate` 的结果固定进用户画像**，保证跨窗口可比。
 - **`activity`（活动量 A）**：只进**日间观测方程**（解释掉运动导致的心率升高），不直接改能量。
-  不传时按 `0.8·steps/120 + 0.2·kcal/6` 算。它与 `load` 分开是刻意的：
+  不传时按 `energy_activity_step()` 算：步数饱和曲线，`steps_ref=500` 步/5 分钟（快走约 500–600 步/5 分钟 ≈ A≈0.9）。v1.1 用 120 步/5 分钟，普通走动就被当成快走。它与 `load` 分开是刻意的：
   `load` 由心率算出，再拿它回归心率就是内生性（会把 `a_E` 从 −12 拉到 −38）。
 - 二者都传时，库不再计算；只传一个时，另一个仍会自动算。
 
@@ -243,9 +254,11 @@ s.steps = ...; s.stress = ...;
 
 | 配置 | 最优做法 | 不配时 |
 |---|---|---|
-| `cfg.obs` | 传离线拟合的 `fit.json` | 群体先验（夜 58 / 日 80 bpm 基线），设备基线不同会拖偏 |
+| `cfg.obs` | 传离线拟合的斜率 | 群体先验斜率；截距在 `baseline.enable=1`（默认）时被个人基线取代 |
+| `cfg.baseline.init` | 画像里保存上次学到的 `energy_baseline_t` | 冷启动：头 3 晚边学边算，输出带 `ENERGY_FLAG_LEARNING` |
+| `cfg.stress_scale` | 设备 0–100 量纲填 100 | 自动按整段/整条流判断量纲 |
 | `cfg.params` | 同上（个体化） | 群体先验 |
-| `cfg.load.l_ref/hr_rest/hr_max` | 用户画像里的固定值 | 批量按本次窗口估；流式用 60/185/0.25 |
+| `cfg.load.l_ref/hr_rest/hr_max/hr_base` | 用户画像里的固定值 | 批量按本次窗口估；流式在线标定 |
 | `cfg.x0` | 接续计算时传上次末状态 | (0.45, 0.55) 冷启动 |
 | `cfg.display` | 产品统一配置 | ρ=0.10、10:00 峰、14:30 谷、30 分钟平滑 |
 
@@ -314,9 +327,49 @@ s.hrv_log = log(rmssd);                          /* rmssd <= 0 时填 NAN */
 
 `energy` 恒在 0–100；`s/e` 恒在 0–1；`lower/upper` 是 95% 置信带（开环时退化为等于 `energy`）。
 
+### 5.1 个体化观测模型（v1.2，只跟自己比）
+
+**原则**：能量只基于个人数据计算，人与人之间横向比较没有意义。静息心率 48 bpm 和 66 bpm 的两个人，
+只要各自"相对自己的常态"一样，就应该得到一样的能量。
+
+**观测方程**（以夜间心率为例，其余三个通道同构）：
+
+```
+HR_night = level_HR_night(个人) + (−12)·E + (−5)·p_deep + 2·p_rem + 9·p_wake + 噪声
+```
+
+`level` 是个人截距：沿同样输入下的开环参考轨迹 E_ref（只由 ODE 推进、从不被观测校正）扣掉 E/分期/活动/节律项后，
+这个人该通道的平均水平。EKF 因此只看到"比你平时高/低多少"，整条心率曲线平移只改变 `level`、不改变 E。
+
+| 机制 | 默认 | 说明 |
+|---|---|---|
+| 学习单位 | 一晚 / 一个白天 | 夜间只用睡眠概率 ≥0.5 的点；日间只用静息样本（A < 0.10） |
+| 首段引导 | 6 个样本（30 分钟） | 之前不做观测校正，之后用段内运行均值作临时基线 |
+| 冷启动 | 前 3 段累计平均 | 观测噪声 R 放大 4 倍并随段数线性回到 1；输出 `ENERGY_FLAG_LEARNING`（前端："正在了解你的常态"） |
+| 平滑更新 | EWMA λ=0.10 | 约 10 晚记忆 |
+| 异常段 | 偏离 >6 bpm / 0.25 / 8 bpm / 0.35 | λ×0.25 降权（生病/饮酒/出差），持续变化最终仍会被跟上 |
+| 持久化 | `energy_ctx_get_baseline` / `cfg.baseline.init` | 把学到的基线存进用户画像，下次直接沿用，跳过冷启动 |
+| 对照 | `cfg.baseline.enable=0` | 回到 v1.1 的群体截距（仅用于对照/回归） |
+
+同时学习个人常规睡眠窗与典型分期构成，供缺口策略使用。
+
+**实测（合成数据，`tests/test_energy.c` 与审查探针）**：静息心率整体平移 −10…+12 bpm，次日 07:30 E 的差异为 0.000
+（关掉基线时最大差 0.716）；连续一个坏夜（心率高于自己常态）E 从 .825 降到 .503，次日恢复到 .853。
+
+**日间观测方程**：活动系数从 105 降到 45 bpm（A=1 ≈ 快走 550 步/5 分钟），`steps_ref` 从 120 改为 500；
+门控用个人残差判断，并在同一通道连续拒绝 `gate_max_reject=6` 次后改为降权接收（防止失锁）。
+日间心率被门控丢弃的比例从 90.1% 降到 0.75%，午后 E>0.98 的比例从 13.5% 降到 0%。
+
+**缺口 / 未佩戴**：缺口前输入最多沿用 `gap.max_hold_h=1h`；超出部分落在个人睡眠窗内按"软睡眠"推进
+（`ENERGY_FLAG_GAP_SLEEP`），其余按清醒静息（L=0）推进，输出带 `ENERGY_FLAG_GAP`。
+整夜未佩戴时次日 07:30 E 为 .853（v1.1 为 0.094）；3 小时缺口后负荷从 1.0 降到 .006。
+
+**压力量纲**：按整段/整条流判断，不按单点判断（v1.1 下 0–100 量纲的 1.2 分被当成满分）；
+可用 `cfg.stress_scale=100` 显式指定。两种量纲下实测 max|ΔE|=0。
+
 ## 6. 参数默认值
 
-与 Python 完全一致（`energy_config_default`）。
+v1.1 部分与 Python 一致（`energy_config_default`）；v1.2 新增/修改项见表尾。
 
 | 参数 | 值 | 含义 |
 |---|---|---|
@@ -334,7 +387,13 @@ s.hrv_log = log(rmssd);                          /* rmssd <= 0 时填 NAN */
 | `gate_sigma / q_floor / robust_nu` | 4.0 / 0.05 / 4.0 | 门控 / 质量下限 / Student-t |
 | `rho / peak / dip` | 0.10 / 10:00 / 14:30（深 0.7、宽 1.6h） | 展示层节律 |
 | `smooth_minutes / band_z` | 30 / 1.96 | 展示平滑 / 置信带 |
-| `b_trimp / w_* / trimp_scale / steps_ref` | 1.92 / 1.0,0.6,0.4 / 10 / 120 | 负荷 |
+| `b_trimp / w_* / trimp_scale / steps_ref` | 1.92 / 1.0,0.6,0.4 / 10 / **500** | 负荷（v1.1：120） |
+| `obs.hr_day[2] / hrv_day[2]` | **45 / −0.35** | 日间活动系数（v1.1：105 / −0.55） |
+| `obs.*[0]` | 58 / 3.55 / 80 / 3.25 | 群体截距，仅 `baseline.enable=0` 或冷启动引导前使用 |
+| `ekf.gate_max_reject` | 6 | 连续拒绝后降权接收 |
+| `baseline.*` | enable=1、cold_nights=3、λ=0.10、cold_r_inflate=4、bootstrap=6、min_samples=12、rest_activity=0.10、anomaly_weight=0.25 | 个体化观测模型（§5.1） |
+| `gap.*` | max_hold_h=1、默认睡眠窗 23→7、模板 {0.10,0.50,0.20,0.20} | 缺口策略 |
+| `stress_scale` | 0（自动） | 压力量纲 |
 
 **依据**：只有 `κ_w` 是由“16h 后 S=0.80”反解出来的（`−ln(0.2)/16=0.1006`）；
 其余是“生理合理性 + 工程试错”的群体先验，用合成数据验证可辨识性。11 个参数里只有 5 个有清晰剖面峰，
@@ -391,11 +450,11 @@ python scripts/check_parity.py 21
 
 - 流式路径**不分配内存**（只有 `energy_compute` 用 malloc），可在中断/任务里调用；
 - 全部 `double`；若要用 `float`，需要把 `energy.h` 里的字段与实现一起改，并重新跑对照；
-- 无全局状态，可多实例；一个 ctx 约 150 字节；
+- 无全局状态，可多实例；一个 ctx 2328 字节（含整份 config 与个人基线/在线标定状态）；
 - `energy_circadian` 每次会算 288 点归一化因子（约 600 次浮点运算），流式每 5 分钟一次可忽略；
   高频调用可自己缓存 `energy_display` 的结果；
-- 观测模型是**群体先验**（夜间 58 bpm、日间 80 bpm 基线）。设备基线不同必须覆盖 `cfg.obs`，
-  否则滤波器会把固定偏移当成能量偏差（Python 端同样问题，实测 +9 bpm 能把 E 拖低 0.2）。
+- v1.2 起观测截距是**个人基线**（§5.1），不同人/设备的固定偏移进基线、不进能量；
+  建议把 `energy_ctx_get_baseline` 的结果存进用户画像，下次通过 `cfg.baseline.init` 传回。
 
 ## 11. 生产使用
 
@@ -413,7 +472,7 @@ python scripts/check_parity.py 21
 
 | 项 | 数值 |
 |---|---|
-| `energy_ctx_t` | 712 B（含整份 config） |
+| `energy_ctx_t` | 2328 B（Linux gcc x86-64，含整份 config 与个人基线） |
 | 批量堆内存 | 约 256 B/样本（6048 点 ≈ 1.5 MB） |
 | 最大栈帧 | 8.3 KB（负荷标定的 288 点分箱）；流式单步 432 B |
 
@@ -431,18 +490,20 @@ python scripts/check_parity.py 21
 
 **构建**
 
-- C99 + libm；GCC/Clang 已验证（`-Wall -Wextra -Wpedantic -Wshadow -Wconversion` 零告警，
-  clang static analyzer 干净）；
+- C99 + libm（Makefile 带 `-D_DEFAULT_SOURCE`）；v1.2 在 Linux gcc `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror`
+  下零告警（Apple clang / clang static analyzer 是 v1.1 时的结论，v1.2 未复测）；
+- 内存不足：`energy_compute` / `energy_load_calibrate` 任一分配失败都返回 `ENERGY_ENOMEM`，无泄漏、无 double free
+  （逐个分配点注入失败，ASan + valgrind 验证）；
 - MSVC 需要 C11 模式与 `isfinite/_finite` 适配（未验证，不在支持列表）；
 - 仓库带 `.gitlab-ci.yml`：`make lib`（-Werror）+ `make test` + `make sanitize`。
 
 ## 12. 测试
 
 ```
-make test        # 61800 个断言
-make sanitize    # ASan + UBSan，0 error
-make coverage    # src/energy.c 行覆盖率 88.54%
-make check       # 单测 + 3 天 C/Python 对照
+make test        # 81794 个断言，0 失败
+make sanitize    # ASan + UBSan，0 error（受限容器见 §2）
+valgrind --leak-check=full ./build/test_energy   # 0 error，无泄漏
+make check       # 单测 + C/Python 对照（仅对 v1.1 对照路径有意义，见 §7）
 python scripts/check_parity.py 21
 ```
 
@@ -452,6 +513,10 @@ python scripts/check_parity.py 21
 
 覆盖范围还包括：配置校验、非法/缺失 tod、t≥1e6h、q>1、极端平滑、非法起始日期、
 n=2 最小面板，以及 20 轮随机 NaN 注入的模糊测试（断言输出有界、无 UB）。
+
+v1.2 新增：体质不变性（心率平移不改变 E）、个人门控拒绝率、日间不饱和、个人偏离（坏夜降、恢复后回升）、
+基线学习与读写 API、流式自动负荷与批量一致、缺口后负荷、整夜未佩戴、压力两种量纲、跨日日历、v1.2 配置校验。
+金标准回归改为锁定 C v1.2 的输出（`test_golden_regression`）。
 
 **变异测试（手工，9 个变异体）**：7 个被杀死；2 个存活是**等价变异**——`ctx_predict` 与 `ctx_clamp`
 两处都做了 [0,1] 裁剪，去掉任意一处行为不变（同时去掉两处则 58 个断言失败，已验证）。
@@ -469,3 +534,6 @@ n=2 最小面板，以及 20 轮随机 NaN 注入的模糊测试（断言输出�
 - **负荷标定单独暴露**：`l_ref` 必须进用户画像，否则窗口间不可比；这是 Python 端踩过的坑（评审 #4）。
 - **未移植异常夜冻结**：它需要两遍回放与跨夜基线，属于上层编排；在 C 端用 `q=0` 表达同样的“不信任这段观测”，更简单。
 - **拒绝把 `energy_circadian` 的归一化固定成 1.0**：会与 Python 差 ~1e-5；改用 288 点网格取 max，整天覆盖时逐位一致，短面板差异可忽略。
+- **v1.2：观测截距个体化，而不是让用户填 `cfg.obs`**：体质差异（静息心率 48 vs 66）原本直接变成能量差异，违背"只跟自己比"。个人基线由库自动学习（冷启动 3 晚 + EWMA λ=0.1，异常夜降权而不冻结），斜率仍用群体先验。代价：头几晚需要学习期（`ENERGY_FLAG_LEARNING`），且 C 与 Python 参考实现不再逐点一致。
+- **v1.2：基线锚定开环参考轨迹 E_ref**：若用 EKF 自己的 E 估计去扣截距，E 的偏差会被基线吸收、形成自洽的漂移；用不受观测影响的 E_ref 避免这种反馈。已知局限：日间基线会吸收部分 E 信号（`examples/stream_demo.c` 中日间 E 估计比开环真值约低 0.1），尚未在真实用户数据上标定。
+- **v1.2：缺口不无限沿用最后输入**：超过 1h 的缺口按个人睡眠窗做软睡眠或清醒静息推进，并打 `ENERGY_FLAG_GAP`，前端据此提示数据不足，而不是给出看似确定的数值。

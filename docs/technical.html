@@ -144,7 +144,7 @@
 <div class="wrap">
 
   <header>
-    <div class="eyebrow">energy-state-c · technical note · v1.1.1</div>
+    <div class="eyebrow">energy-state-c · technical note · v1.2.0</div>
     <h1>从五路信号到一条能量曲线</h1>
     <p class="lede">这个 C 库把智能戒指的心率、HRV、睡眠分期、步数与压力，变成一条 5 分钟粒度、0–100 的能量曲线，附带每日汇总与睡眠恢复报告。本文说明它的数据流、模型、接口与验证边界。</p>
     <div class="meta">
@@ -161,8 +161,8 @@
     <div class="cover-grid">
       <div class="cover-cell"><div class="n" style="color:#3f5bd9">7</div><div class="l">个处理阶段</div></div>
       <div class="cover-cell"><div class="n" style="color:#bf4520">2</div><div class="l">个隐状态 S / E</div></div>
-      <div class="cover-cell"><div class="n" style="color:#2c7a4b">64,404</div><div class="l">单元测试断言</div></div>
-      <div class="cover-cell"><div class="n" style="color:#a8650f">9.9e-14</div><div class="l">与 Python 的最大偏差</div></div>
+      <div class="cover-cell"><div class="n" style="color:#2c7a4b">81,794</div><div class="l">单元测试断言</div></div>
+      <div class="cover-cell"><div class="n" style="color:#a8650f">9.9e-14</div><div class="l">与 Python 的最大偏差（v1.1 对照路径）</div></div>
     </div>
     <h3>结构</h3>
     <ol class="cover-toc">
@@ -487,8 +487,8 @@ E∞ = α / (α + β);      E(t+h) = E∞ + (E − E∞) · e^(−(α+β)·h)</p
     <table>
       <thead><tr><th style="width:120px">通道</th><th>夜间方程</th><th>日间方程</th></tr></thead>
       <tbody>
-        <tr><td><code>HR</code></td><td>58 − 12·E − 5·p_deep + 2·p_rem + 9·p_wake</td><td>80 − 12·E + 105·A + 谐波</td></tr>
-        <tr><td><code>ln RMSSD</code></td><td>3.55 + 0.45·E + 0.30·p_deep + 0.18·p_rem − 0.35·p_wake</td><td>3.25 + 0.45·E − 0.55·A + 谐波</td></tr>
+        <tr><td><code>HR</code></td><td><b>b<sub>HR,夜</sub></b> − 12·E − 5·p_deep + 2·p_rem + 9·p_wake</td><td><b>b<sub>HR,日</sub></b> − 12·E + 45·A + 谐波</td></tr>
+        <tr><td><code>ln RMSSD</code></td><td><b>b<sub>HRV,夜</sub></b> + 0.45·E + 0.30·p_deep + 0.18·p_rem − 0.35·p_wake</td><td><b>b<sub>HRV,日</sub></b> + 0.45·E − 0.35·A + 谐波</td></tr>
       </tbody>
     </table>
 
@@ -501,15 +501,38 @@ E∞ = α / (α + β);      E(t+h) = E∞ + (E − E∞) · e^(−(α+β)·h)</p
           <li>Joseph 形式：长期运行协方差不发散</li>
         </ul>
       </div>
-      <div class="card"><h4><span class="dot" style="background:#3f5bd9"></span>一个必须知道的脆弱点</h4>
+      <div class="card"><h4><span class="dot" style="background:#3f5bd9"></span>只跟自己比（v1.2）</h4>
         <ul>
-          <li>持续性心率偏移（+9 bpm）会被当成“能量低”</li>
-          <li>4σ 门控挡不住：它只看单点</li>
-          <li>对策：异常夜冻结观测（q=0）后重跑</li>
-          <li>不做这一步，测试段 RMSE 从 0.045 升到 0.13</li>
+          <li>截距 b 是个人基线，不是群体常数（v1.1 夜间写死 58 bpm）</li>
+          <li>心率整体平移 −10…+12 bpm：E 差异 0.000（合成数据）</li>
+          <li>坏夜（高于自己常态）E 从 .825 降到 .503，次日回到 .853</li>
+          <li>门控用个人残差：日间拒绝率 90.1% → 0.75%</li>
         </ul>
       </div>
     </div>
+
+    <h3>个体化观测模型：基线怎么来、怎么更新</h3>
+    <p>表中加粗的 <b>b</b> 是四个通道（夜/日 × HR/ln RMSSD）的个人截距：沿同样输入下的开环参考轨迹 E<sub>ref</sub>（只由 ODE 推进、从不被观测校正）扣掉 E、分期、活动和节律项之后，这个人该通道的平均水平。EKF 因此只看到"比你平时高或低多少"；体质差异进基线，不进能量。用 E<sub>ref</sub> 而不是滤波后的 E 去扣截距，是为了避免估计偏差被基线吸收后自我强化。</p>
+    <table>
+      <thead><tr><th style="width:120px">阶段</th><th>做法（默认值）</th></tr></thead>
+      <tbody>
+        <tr><td>学习单位</td><td>一晚（睡眠概率 ≥0.5 的点）或一个白天（静息样本 A &lt; 0.10）</td></tr>
+        <tr><td>首段引导</td><td>满 6 个样本（30 分钟）前不做观测校正，之后用段内运行均值作临时基线</td></tr>
+        <tr><td>冷启动</td><td>前 3 段累计平均；观测噪声 R ×4 并随段数线性回到 1；输出 <code>ENERGY_FLAG_LEARNING</code>，前端提示"正在了解你的常态"</td></tr>
+        <tr><td>平滑更新</td><td>EWMA，λ = 0.10（约 10 晚记忆）</td></tr>
+        <tr><td>异常段</td><td>偏离 &gt; 6 bpm / 0.25 / 8 bpm / 0.35 时 λ × 0.25（降权而不冻结，持续变化最终会被跟上）</td></tr>
+        <tr><td>持久化</td><td><code>energy_ctx_get_baseline()</code> 存进用户画像，下次经 <code>cfg.baseline.init</code> 传回即可跳过冷启动</td></tr>
+      </tbody>
+    </table>
+    <h3>日间方程、缺口与压力量纲（v1.2 修正）</h3>
+    <ul>
+      <li><b>活动量 A</b>：步数饱和曲线，<code>steps_ref = 500</code> 步/5 分钟（快走 ≈ 500–600 步 → A≈0.9）；活动对心率的系数 105 → 45 bpm。v1.1 下 120 步/5 分钟即算快走，午后 E&gt;0.98 的比例 13.5%，v1.2 为 0%。</li>
+      <li><b>门控防失锁</b>：同一通道连续被 4σ 门控拒绝 6 次后改为降权接收。</li>
+      <li><b>缺口 / 未佩戴</b>：缺口前输入最多沿用 1 小时；之后落在个人睡眠窗内按"软睡眠"推进，其余按清醒静息（L=0）推进，并打 <code>ENERGY_FLAG_GAP</code>。整夜未佩戴次日 07:30 E：0.094 → .853；3 小时缺口后流式负荷：1.0 → .006。</li>
+      <li><b>流式负荷</b>：未填画像时在线标定 hr_rest/hr_max/l_ref/hr_base，与批量同一套规则；同一时刻批量/流式 .944/.124（v1.1）→ .552/.517。</li>
+      <li><b>压力量纲</b>：按整段/整条流判断（或 <code>cfg.stress_scale = 100</code>），不再把 0–100 量纲下的 1.2 分当成满分。</li>
+    </ul>
+    <p class="note">以上数字均来自合成数据（单元测试与审查探针），尚未在真实用户数据上验证。</p>
   </section>
 
   <!-- 5 -->
@@ -700,10 +723,10 @@ energy_ctx_step(&amp;ctx, &amp;sample, &amp;p);   <span class="c">/* p.energy = 
     <p>所有数字都来自仓库里的可复现命令：<code class="inl">make test</code>、<code class="inl">make sanitize</code>、<code class="inl">python scripts/check_parity.py 21</code>。与 Python 参考实现的对照是逐点的，不是“看起来差不多”。</p>
 
     <div class="stats">
-      <div class="stat g"><div class="n">64,404</div><div class="l">单元测试断言</div></div>
-      <div class="stat t"><div class="n">89.0%</div><div class="l">行覆盖率（gcov）</div></div>
-      <div class="stat i"><div class="n">9.9e-14</div><div class="l">与 Python 的最大能量偏差</div></div>
-      <div class="stat a"><div class="n">26 ms</div><div class="l">21 天 6048 点（批量）</div></div>
+      <div class="stat g"><div class="n">81,794</div><div class="l">单元测试断言</div></div>
+      <div class="stat t"><div class="n">89.0%</div><div class="l">行覆盖率（gcov，v1.1 实测）</div></div>
+      <div class="stat i"><div class="n">9.9e-14</div><div class="l">与 Python 的最大能量偏差（v1.1；v1.2 个体基线无 Python 对应）</div></div>
+      <div class="stat a"><div class="n">26 ms</div><div class="l">21 天 6048 点（批量，v1.1 实测）</div></div>
     </div>
 
     <table>
@@ -744,7 +767,7 @@ energy_ctx_step(&amp;ctx, &amp;sample, &amp;p);   <span class="c">/* p.energy = 
   </section>
 
   <footer>
-    <span>energy-state-c v1.1.1 · C99 · 单头文件 · 无第三方依赖</span>
+    <span>energy-state-c v1.2.0 · C99 · 单头文件 · 无第三方依赖</span>
     <span>技术说明 · 图表基于真实实现与实测数据</span>
   </footer>
 </div>
