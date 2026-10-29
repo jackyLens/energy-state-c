@@ -12,6 +12,7 @@
  */
 
 #include "energy.h"
+#include "vitality.h"
 
 #include <locale.h>
 #include <math.h>
@@ -184,6 +185,69 @@ static int write_points(const char *path, const energy_output_t *out)
     return 0;
 }
 
+/* --vitality：在能量列之后追加精力列（同一行，同一时间戳） */
+static int write_vpoints(const char *path, const vitality_output_t *vo)
+{
+    FILE *fp = stdout;
+    if (path) {
+        fp = fopen(path, "w");
+        if (!fp) {
+            fprintf(stderr, "写入失败: %s\n", path);
+            return -1;
+        }
+    }
+    fprintf(fp, "t_h,tod,s,e,e_sd,energy,lower,upper,base,load,activity,"
+                "v_star,d,d_sd,vitality,percentile,vscore,vlower,vupper,quadrant,vflags\n");
+    for (size_t i = 0; i < vo->n_points; i++) {
+        const energy_point_t *p = &vo->energy.points[i];
+        const vitality_point_t *v = &vo->points[i];
+        fprintf(fp,
+                "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,"
+                "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%d,%u\n",
+                p->t_h, p->tod, p->s, p->e, p->e_sd, p->energy, p->lower, p->upper, p->base, p->load,
+                p->activity, v->v_star, v->d, v->d_sd, v->vitality, v->percentile, v->score, v->lower,
+                v->upper, (int)v->quadrant, v->flags);
+    }
+    if (path) {
+        const int rc = ferror(fp);
+        fclose(fp);
+        if (rc) {
+            fprintf(stderr, "写入失败（磁盘/权限）: %s\n", path);
+            return -1;
+        }
+    } else if (fflush(fp) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static int run_vitality(const energy_sample_t *samples, size_t n, const energy_config_t *cfg,
+                        const char *out_path)
+{
+    vitality_output_t vo;
+    const int rc = vitality_compute(samples, n, cfg, NULL, &vo);
+    if (rc != ENERGY_OK) {
+        fprintf(stderr, "vitality_compute 失败: %d\n", rc);
+        return 1;
+    }
+    if (write_vpoints(out_path, &vo) != 0) {
+        vitality_output_free(&vo);
+        return 1;
+    }
+    fprintf(stderr, "样本 %zu，天数 %zu，能量 %.1f–%.1f（均值 %.1f），精力 %.1f–%.1f（均值 %.1f）\n",
+            vo.n_points, vo.n_daily, vo.energy.stats_min, vo.energy.stats_max, vo.energy.stats_mean,
+            vo.stats_min, vo.stats_max, vo.stats_mean);
+    fprintf(stderr, "\n日期   起床精力  D_init   均值   最低   最高   运动  午睡  过载点  用户标记\n");
+    for (size_t i = 0; i < vo.n_daily; i++) {
+        const vitality_daily_t *d = &vo.daily[i];
+        fprintf(stderr, "%-6s %7.1f  %+6.3f  %5.1f  %5.1f  %5.1f  %4d  %4d  %6d  %8d\n",
+                d->date[0] ? d->date : "-", d->wake_score, d->d_init, d->mean, d->min, d->max,
+                d->n_exercise, d->n_nap, d->n_stress_samples, d->n_user_events);
+    }
+    vitality_output_free(&vo);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     setlocale(LC_NUMERIC, "C"); /* CSV 的解析/输出必须是 C locale，避免逗号小数 */
@@ -192,6 +256,7 @@ int main(int argc, char **argv)
     int use_ekf = 1;
     int no_smooth = 0;
     int load_stats = 0;
+    int vitality = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--out") == 0 && i + 1 < argc) {
@@ -202,15 +267,17 @@ int main(int argc, char **argv)
             no_smooth = 1;
         } else if (strcmp(argv[i], "--load-stats") == 0) {
             load_stats = 1;
+        } else if (strcmp(argv[i], "--vitality") == 0) {
+            vitality = 1;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            printf("用法: %s <panel.csv> [--out out.csv] [--no-ekf] [--no-smooth] [--load-stats]\n", argv[0]);
+            printf("用法: %s <panel.csv> [--out out.csv] [--no-ekf] [--no-smooth] [--load-stats] [--vitality]\n", argv[0]);
             return 0;
         } else if (!in_path) {
             in_path = argv[i];
         }
     }
     if (!in_path) {
-        fprintf(stderr, "用法: %s <panel.csv> [--out out.csv] [--no-ekf] [--no-smooth]\n", argv[0]);
+        fprintf(stderr, "用法: %s <panel.csv> [--out out.csv] [--no-ekf] [--no-smooth] [--load-stats] [--vitality]\n", argv[0]);
         return 2;
     }
 
@@ -235,6 +302,12 @@ int main(int argc, char **argv)
         if (energy_load_calibrate(samples, n, &cfg.load, &st) == ENERGY_OK) {
             printf("hr_rest=%.17g hr_max=%.17g l_ref=%.17g\n", st.hr_rest, st.hr_max, st.l_ref);
         }
+    }
+
+    if (vitality) {
+        const int vrc = run_vitality(samples, n, &cfg, out_path);
+        free(samples);
+        return vrc;
     }
 
     energy_output_t out;
