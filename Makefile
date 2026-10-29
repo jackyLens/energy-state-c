@@ -1,6 +1,11 @@
 CC      ?= cc
 PYTHON  ?= python3
-CFLAGS  ?= -O2 -std=c99 -Wall -Wextra -Wpedantic -Wshadow -Wconversion
+# -D_DEFAULT_SOURCE: glibc hides M_PI / clock_gettime etc. under strict -std=c99.
+CFLAGS  ?= -O2 -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -Wpedantic -Wshadow -Wconversion
+# Sanitizer runs: some sandboxes need ASLR disabled, e.g.
+#   make sanitize SAN_RUN="setarch $$(uname -m) -R" ASAN_OPTIONS=detect_leaks=0
+SAN_RUN ?=
+SAN_FLAGS := -O1 -g -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all
 INC     := -Iinclude
 BUILD   := build
 
@@ -45,11 +50,9 @@ test: $(BUILD)/test_energy
 	@$(BUILD)/test_energy
 
 sanitize: | $(BUILD)
-	$(CC) -O1 -g -std=c99 -Wall -Wextra $(INC) -fsanitize=address,undefined -fno-sanitize-recover=all \
-		$(LIB_SRC) $(CLI_SRC) -lm -o $(BUILD)/energy_cli_san
-	$(CC) -O1 -g -std=c99 -Wall -Wextra $(INC) -fsanitize=address,undefined -fno-sanitize-recover=all \
-		$(LIB_SRC) $(TEST_SRC) -lm -o $(BUILD)/test_energy_san
-	@$(BUILD)/test_energy_san
+	$(CC) $(SAN_FLAGS) $(INC) $(LIB_SRC) $(CLI_SRC) -lm -o $(BUILD)/energy_cli_san
+	$(CC) $(SAN_FLAGS) $(INC) $(LIB_SRC) $(TEST_SRC) -lm -o $(BUILD)/test_energy_san
+	@$(SAN_RUN) $(BUILD)/test_energy_san
 	@echo "sanitizers: OK"
 
 CHROME ?= $(shell command -v google-chrome 2>/dev/null || command -v chromium 2>/dev/null || echo "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
@@ -66,8 +69,8 @@ docs:
 	@echo "docs: docs/technical.pdf, docs/product.pdf"
 
 coverage: | $(BUILD)
-	$(CC) -O0 -g --coverage -std=c99 -Wall -Wextra $(INC) -c src/energy.c -o $(BUILD)/energy_cov.o
-	$(CC) -O0 -g --coverage -std=c99 -Wall -Wextra $(INC) tests/test_energy.c $(BUILD)/energy_cov.o -lm -o $(BUILD)/test_cov
+	$(CC) -O0 -g --coverage -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra $(INC) -c src/energy.c -o $(BUILD)/energy_cov.o
+	$(CC) -O0 -g --coverage -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra $(INC) tests/test_energy.c $(BUILD)/energy_cov.o -lm -o $(BUILD)/test_cov
 	@$(BUILD)/test_cov >/dev/null
 	@gcov -o $(BUILD) $(BUILD)/energy_cov.gcno | grep -A1 "energy.c"
 

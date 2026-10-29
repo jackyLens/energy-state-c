@@ -9,7 +9,8 @@ build:
   stage: build
   image: gcc:13
   script:
-    - make lib CFLAGS="-O2 -std=c99 -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror"
+    - make lib CFLAGS="-O2 -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror"
+    - make all build/bench_energy CFLAGS="-O2 -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror"
   artifacts:
     paths:
       - build/libenergy.a

@@ -1,3 +1,5 @@
+/* clock_gettime / struct timespec need POSIX.1b under strict -std=c99. */
+#define _POSIX_C_SOURCE 199309L
 /*
  * bench_energy.c —— 纯计算性能（不含 CSV I/O）
  *
