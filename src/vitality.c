@@ -105,6 +105,11 @@ void vitality_morning_default(vitality_morning_t *c)
     c->w_delta_e = 0.4;
     c->w_hrv = 0.3;
     c->w_sleep = 0.3;
+    c->w_spo2 = 0.2;
+    c->spo2_dip_delta = 3.0;
+    c->spo2_mean_scale = 1.5;
+    c->spo2_dip_scale = 0.10;
+    c->spo2_min_cover = 0.5;
     c->sigma_hrv_night = 0.22;
     c->lambda = 0.20;
     c->cold_nights = 3;
@@ -189,7 +194,9 @@ int vitality_config_validate(const vitality_config_t *cfg, char *errbuf, size_t 
         return vfail(errbuf, errlen, "event: 时长/阈值区间非法");
     const vitality_morning_t *m = &cfg->morning;
     if (!isfinite(m->gain) || !isfinite(m->w_delta_e) || !isfinite(m->w_hrv) || !isfinite(m->w_sleep) ||
-        !pos_finite(m->sigma_hrv_night) || !isfinite(m->lambda) || m->lambda <= 0.0 || m->lambda > 1.0 ||
+        !isfinite(m->w_spo2) || !pos_finite(m->spo2_dip_delta) || !pos_finite(m->spo2_mean_scale) ||
+        !pos_finite(m->spo2_dip_scale) || !isfinite(m->spo2_min_cover) || m->spo2_min_cover < 0.0 ||
+        m->spo2_min_cover > 1.0 || !pos_finite(m->sigma_hrv_night) || !isfinite(m->lambda) || m->lambda <= 0.0 || m->lambda > 1.0 ||
         m->cold_nights < 0 || !pos_finite(m->min_sleep_h) || !isfinite(m->min_sleep_prob) ||
         m->min_sleep_prob <= 0.0 || m->min_sleep_prob > 1.0)
         return vfail(errbuf, errlen, "morning: 参数非法");
@@ -272,20 +279,25 @@ static void habit_clear(vitality_habit_t *h)
 {
     memset(h, 0, sizeof(*h));
     h->delta_e = h->hrv_wake = h->sleep_h = h->deep_frac = h->wake_frac = (double)NAN;
+    h->spo2_mean = h->spo2_dip = (double)NAN;
 }
 
 static int habit_valid(const vitality_habit_t *h)
 {
-    if (!h || h->n_nights < 0) return 0;
+    if (!h || h->n_nights < 0 || h->n_spo2_nights < 0 || h->n_spo2_nights > h->n_nights) return 0;
     if (h->n_nights == 0) return 1;
-    const double v[5] = {h->delta_e, h->hrv_wake, h->sleep_h, h->deep_frac, h->wake_frac};
-    for (int i = 0; i < 5; i++) {
+    const double v[7] = {h->delta_e, h->hrv_wake, h->sleep_h, h->deep_frac, h->wake_frac,
+                         h->spo2_mean, h->spo2_dip};
+    for (int i = 0; i < 7; i++) {
         if (isnan(v[i])) continue; /* 单项缺失允许 */
         if (!isfinite(v[i])) return 0;
     }
     if (!isnan(h->sleep_h) && (h->sleep_h < 0.0 || h->sleep_h > 24.0)) return 0;
     if (!isnan(h->deep_frac) && (h->deep_frac < 0.0 || h->deep_frac > 1.0)) return 0;
     if (!isnan(h->wake_frac) && (h->wake_frac < 0.0 || h->wake_frac > 1.0)) return 0;
+    /* 旧画像（memset 0）的 spo2_mean==0 视为缺失 */
+    if (!isnan(h->spo2_mean) && h->spo2_mean != 0.0 && (h->spo2_mean < 50.0 || h->spo2_mean > 100.0)) return 0;
+    if (!isnan(h->spo2_dip) && (h->spo2_dip < 0.0 || h->spo2_dip > 1.0)) return 0;
     return 1;
 }
 
@@ -313,12 +325,15 @@ void vitality_ctx_init(vitality_ctx_t *ctx, const energy_config_t *ecfg, const v
     ctx->last_d_init = (double)NAN;
     ctx->last_close_t = (double)NAN;
     habit_clear(&ctx->habit_before_close);
+    ctx->last_spo2_mean = ctx->last_spo2_dip = ctx->last_x_spo2 = (double)NAN;
 }
 
 int vitality_ctx_set_habit(vitality_ctx_t *ctx, const vitality_habit_t *h)
 {
     if (!ctx || !habit_valid(h)) return ENERGY_EINVAL;
     ctx->habit = *h;
+    if (ctx->habit.spo2_mean == 0.0) ctx->habit.spo2_mean = (double)NAN; /* 旧画像无血氧 */
+    if (ctx->habit.n_spo2_nights == 0) ctx->habit.spo2_mean = ctx->habit.spo2_dip = (double)NAN;
     return ENERGY_OK;
 }
 
@@ -386,8 +401,54 @@ static void sleep_begin(vitality_ctx_t *ctx, double t, double e)
     ctx->sleep_t0 = t;
     ctx->sleep_e0 = e;
     memset(ctx->sleep_stage_acc, 0, sizeof(ctx->sleep_stage_acc));
+    memset(ctx->spo2_hist, 0, sizeof(ctx->spo2_hist));
+    ctx->spo2_n = 0;
+    ctx->spo2_sum = 0.0;
     ctx->last_close_main = 0;
     ctx->awake_between_n = 0;
+}
+
+/* ---- 夜间血氧 ------------------------------------------------------------------------ */
+/* 血氧有效性：NAN / 0 / [50,100] 之外一律视为缺失 */
+static int spo2_valid(double v)
+{
+    return isfinite(v) && v >= 50.0 && v <= 100.0;
+}
+
+static void spo2_observe(vitality_ctx_t *ctx, const energy_sample_t *sample)
+{
+    if (!spo2_valid(sample->spo2)) return;
+    double lo = spo2_valid(sample->spo2_min) ? fmin(sample->spo2_min, sample->spo2) : sample->spo2;
+    int b = (int)floor(lo + 0.5) - VITALITY_SPO2_LO;
+    if (b < 0) b = 0;
+    if (b >= VITALITY_SPO2_BINS) b = VITALITY_SPO2_BINS - 1;
+    ctx->spo2_hist[b]++;
+    ctx->spo2_n++;
+    ctx->spo2_sum += sample->spo2;
+}
+
+/* 本夜血氧统计：均值 + 瞬时下跌占比（样本低值 ≤ 中位数 − dip_delta）；覆盖不足返回 0 */
+static int spo2_night_stats(const vitality_ctx_t *ctx, double *mean, double *dip)
+{
+    const vitality_morning_t *m = &ctx->cfg.morning;
+    const int n = ctx->spo2_n;
+    *mean = *dip = (double)NAN;
+    if (n < 12 || (double)n < m->spo2_min_cover * (double)ctx->sleep_n) return 0;
+    /* 直方图中位数 */
+    int acc = 0, med = VITALITY_SPO2_BINS - 1;
+    for (int b = 0; b < VITALITY_SPO2_BINS; b++) {
+        acc += ctx->spo2_hist[b];
+        if (2 * acc >= n) {
+            med = b;
+            break;
+        }
+    }
+    const int thr = med - (int)ceil(m->spo2_dip_delta - 1e-9); /* 箱号 ≤ thr 即下跌 */
+    int below = 0;
+    for (int b = 0; b < VITALITY_SPO2_BINS && b <= thr; b++) below += ctx->spo2_hist[b];
+    *mean = ctx->spo2_sum / (double)n;
+    *dip = (double)below / (double)n;
+    return 1;
 }
 
 static void habit_blend(double *field, double x, double lam)
@@ -419,10 +480,12 @@ static int sleep_close(vitality_ctx_t *ctx, double e_now, double *d_init_out)
         hrv = s / (double)ctx->hrv_recent_n;
     }
     const double delta_e = e_now - ctx->sleep_e0;
+    double spo2_mean, spo2_dip;
+    const int has_spo2 = spo2_night_stats(ctx, &spo2_mean, &spo2_dip);
 
-    /* 三项都相对本人常态；常态未知的项为 0（“不知道就不猜”） */
+    /* 四项都相对本人常态；常态未知的项为 0（“不知道就不猜”） */
     const vitality_habit_t *h = &ctx->habit;
-    double x1 = 0.0, x2 = 0.0, x3 = 0.0;
+    double x1 = 0.0, x2 = 0.0, x3 = 0.0, x4 = 0.0;
     if (h->n_nights > 0) {
         if (isfinite(h->delta_e)) x1 = vclamp((delta_e - h->delta_e) / 0.30, -0.5, 0.5);
         if (isfinite(h->hrv_wake) && isfinite(hrv))
@@ -433,8 +496,23 @@ static int sleep_close(vitality_ctx_t *ctx, double e_now, double *d_init_out)
         if (isfinite(h->deep_frac) && isfinite(deep)) q += 0.25 * vclamp((deep - h->deep_frac) / 0.10, -1.0, 1.0);
         if (isfinite(h->wake_frac) && isfinite(wake)) q -= 0.25 * vclamp((wake - h->wake_frac) / 0.10, -1.0, 1.0);
         x3 = vclamp(q, -0.5, 0.5);
+        /* 夜间血氧平稳度：均值低于常态 / 瞬时下跌比常态多 → 负；
+         * 均值高于常态的正向收益减半（SpO₂ 有天花板，“比平时更高”信息量小） */
+        if (has_spo2 && h->n_spo2_nights > 0) {
+            double r = 0.0;
+            if (isfinite(h->spo2_mean)) {
+                const double dm = vclamp((spo2_mean - h->spo2_mean) / m->spo2_mean_scale, -1.0, 1.0);
+                r += 0.5 * (dm > 0.0 ? 0.5 * dm : dm);
+            }
+            if (isfinite(h->spo2_dip)) r -= 0.5 * vclamp((spo2_dip - h->spo2_dip) / m->spo2_dip_scale, -1.0, 1.0);
+            x4 = vclamp(r, -0.5, 0.5);
+        }
     }
-    const double d_init = m->gain * (m->w_delta_e * x1 + m->w_hrv * x2 + m->w_sleep * x3);
+    const double d_init =
+        m->gain * vclamp(m->w_delta_e * x1 + m->w_hrv * x2 + m->w_sleep * x3 + m->w_spo2 * x4, -0.5, 0.5);
+    ctx->last_spo2_mean = has_spo2 ? spo2_mean : (double)NAN;
+    ctx->last_spo2_dip = has_spo2 ? spo2_dip : (double)NAN;
+    ctx->last_x_spo2 = has_spo2 ? x4 : (double)NAN;
 
     /* 更新常态：前 cold_nights 晚累计平均，之后 EWMA（先留快照，续睡合并时回滚重算） */
     ctx->habit_before_close = ctx->habit;
@@ -444,6 +522,12 @@ static int sleep_close(vitality_ctx_t *ctx, double e_now, double *d_init_out)
     habit_blend(&ctx->habit.sleep_h, sleep_h, lam);
     habit_blend(&ctx->habit.deep_frac, deep, lam);
     habit_blend(&ctx->habit.wake_frac, wake, lam);
+    if (has_spo2) {
+        const double lam_s = (h->n_spo2_nights < m->cold_nights) ? 1.0 / (double)(h->n_spo2_nights + 1) : m->lambda;
+        habit_blend(&ctx->habit.spo2_mean, spo2_mean, lam_s);
+        habit_blend(&ctx->habit.spo2_dip, spo2_dip, lam_s);
+        if (ctx->habit.n_spo2_nights < 1000000) ctx->habit.n_spo2_nights++;
+    }
     if (ctx->habit.n_nights < 1000000) ctx->habit.n_nights++;
 
     ctx->d = d_init;
@@ -510,6 +594,9 @@ static void fill_point(const vitality_ctx_t *ctx, const energy_point_t *ep, doub
     out->v_star = v_star;
     out->d = ctx->d;
     out->d_init = (flags & VITALITY_FLAG_WAKE) ? ctx->last_d_init : (double)NAN;
+    const int spo2_pt = (flags & VITALITY_FLAG_WAKE) && (flags & VITALITY_FLAG_SPO2);
+    out->spo2_night = spo2_pt ? ctx->last_spo2_mean : (double)NAN;
+    out->spo2_dip = spo2_pt ? ctx->last_spo2_dip : (double)NAN;
     /* V 对 E 的灵敏度 ≈ (1+ρc)，把能量的不确定性也折进带宽 */
     const double dv_de = (out->e > 0.0) ? v_star / out->e : 1.0;
     const double var = fmax(ctx->p, 0.0) + dv_de * dv_de * finite_or(ep->e_sd, 0.0) * finite_or(ep->e_sd, 0.0);
@@ -616,6 +703,7 @@ int vitality_ctx_feed(vitality_ctx_t *ctx, const energy_sample_t *sample,
         if (asleep) {
             ctx->sleep_n++;
             ctx->awake_run = 0;
+            spo2_observe(ctx, sample);
             if (isfinite(sample->hrv_log) && finite_or(sample->q_hrv, 1.0) > 0.0) {
                 ctx->hrv_recent[ctx->hrv_recent_i] = sample->hrv_log;
                 ctx->hrv_recent_i = (ctx->hrv_recent_i + 1) % 12;
@@ -634,6 +722,10 @@ int vitality_ctx_feed(vitality_ctx_t *ctx, const energy_sample_t *sample,
                 ctx->last_close_main = 1;
                 ctx->awake_between_n = 0;
                 flags |= VITALITY_FLAG_WAKE;
+                if (isfinite(ctx->last_x_spo2)) {
+                    flags |= VITALITY_FLAG_SPO2;
+                    if (ctx->last_x_spo2 <= -0.25) flags |= VITALITY_FLAG_BREATH;
+                }
             } else if (cfg->detect_events && sleep_h >= cfg->event.nap_min_h && sleep_h <= cfg->event.nap_max_h &&
                        nap_window) {
                 ctx->d += cfg->event.a_nap * fmin(1.0, sleep_h / cfg->event.nap_full_h);
@@ -845,6 +937,7 @@ static void daily_summary(const vitality_output_t *out, vitality_daily_t *daily,
         dd->day = (int)d;
         if (d < out->energy.n_daily) memcpy(dd->date, out->energy.daily[d].date, sizeof(dd->date));
         dd->wake_score = dd->d_init = dd->peak_tod = dd->dip_tod = (double)NAN;
+        dd->spo2_night = dd->spo2_dip = (double)NAN;
         dd->min = DBL_MAX;
         dd->max = -DBL_MAX;
     }
@@ -857,6 +950,8 @@ static void daily_summary(const vitality_output_t *out, vitality_daily_t *daily,
         if (p->flags & VITALITY_FLAG_WAKE) {
             dd->wake_score = p->score;
             dd->d_init = p->d_init;
+            dd->spo2_night = p->spo2_night;
+            dd->spo2_dip = p->spo2_dip;
         }
         if (p->flags & VITALITY_FLAG_EXERCISE) dd->n_exercise++;
         if (p->flags & VITALITY_FLAG_NAP) dd->n_nap++;

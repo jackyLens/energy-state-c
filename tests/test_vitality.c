@@ -48,6 +48,10 @@ typedef struct {
     int short_day;      /* 该日凌晨 0 点才睡、5 点醒（只睡 5 h）；<0 关闭 */
     int broken_day;     /* 该日凌晨 03:00–03:20 夜醒 20 min（硬 wake 标签）；<0 关闭 */
     double hr_offset;   /* 整体心率平移（体质差异） */
+    double spo2;        /* >0：夜间每点血氧均值（恒定）；0 = 不给血氧 */
+    int spo2_bad_day;   /* 该日醒来前那一夜血氧不稳：均值 −3、15% 的样本再低 4；<0 关闭 */
+    int spo2_sparse_day; /* 该日醒来前那一夜只有 30% 样本有血氧；<0 关闭 */
+    int spo2_min_day;   /* 该日醒来前那一夜 spo2 均值不变、但 20% 样本 spo2_min 低 4；<0 关闭 */
 } scenario_t;
 
 static void scenario_default(scenario_t *sc)
@@ -55,6 +59,8 @@ static void scenario_default(scenario_t *sc)
     sc->nap_day = sc->exercise_day = sc->arousal_day = sc->stress_day = sc->short_day = -1;
     sc->broken_day = -1;
     sc->hr_offset = 0.0;
+    sc->spo2 = 0.0;
+    sc->spo2_bad_day = sc->spo2_sparse_day = sc->spo2_min_day = -1;
 }
 
 static energy_sample_t *make_panel(size_t days, const scenario_t *sc, size_t *n_out)
@@ -108,6 +114,18 @@ static energy_sample_t *make_panel(size_t days, const scenario_t *sc, size_t *n_
         p->hrv_log = hrv;
         p->steps = steps;
         p->stress = 0.25;
+        if (asleep && sc->spo2 > 0.0) {
+            /* “醒来那天”的夜 = 前一日 23:00 起到当日 07:00 */
+            const int wake_day = (tod >= 23.0) ? day + 1 : day;
+            const int k = (int)i % 20; /* 确定性的样本抽样，不用随机数 */
+            p->spo2 = sc->spo2;
+            if (sc->spo2_bad_day == wake_day) {
+                p->spo2 = sc->spo2 - 3.0;
+                if (k < 3) p->spo2 -= 4.0; /* 15% 的样本瞬时下跌 */
+            }
+            if (sc->spo2_min_day == wake_day && k < 4) p->spo2_min = sc->spo2 - 4.0; /* 20% 的样本窗口内最低值下跌 */
+            if (sc->spo2_sparse_day == wake_day && k >= 6) p->spo2 = NAN; /* 只剩 30% 覆盖 */
+        }
     }
     *n_out = n;
     return s;
@@ -732,6 +750,187 @@ static void test_nan_fuzz_and_gaps(void)
     free(s);
 }
 
+static void test_spo2(void)
+{
+    const size_t days = 6;
+    scenario_t sc0;
+    scenario_default(&sc0);
+    vitality_output_t base, steady, bad, sparse, vmin;
+    CHECK(run_batch(days, &sc0, NULL, &base) == ENERGY_OK);
+
+    /* ① 恒定血氧（每晚一样）：常态学到 97 / 0 下跌，x_SpO2 恒为 0 → 与无血氧逐位一致 */
+    scenario_t sc1 = sc0;
+    sc1.spo2 = 97.0;
+    CHECK(run_batch(days, &sc1, NULL, &steady) == ENERGY_OK);
+    CHECK(steady.n_points == base.n_points);
+    CHECK(steady.habit.n_spo2_nights == (int)days && steady.habit.n_nights == (int)days);
+    CHECK_NEAR(steady.habit.spo2_mean, 97.0, 1e-9);
+    CHECK_NEAR(steady.habit.spo2_dip, 0.0, 1e-12);
+    int n_spo2_pts = 0, n_breath = 0;
+    for (size_t i = 0; i < base.n_points; i++) {
+        CHECK(steady.points[i].v == base.points[i].v);
+        CHECK(steady.points[i].d == base.points[i].d);
+        if (steady.points[i].flags & VITALITY_FLAG_SPO2) {
+            n_spo2_pts++;
+            CHECK(steady.points[i].flags & VITALITY_FLAG_WAKE);
+            CHECK_NEAR(steady.points[i].spo2_night, 97.0, 1e-9);
+            CHECK(steady.points[i].spo2_dip == 0.0);
+        } else {
+            CHECK(isnan(steady.points[i].spo2_night) && isnan(steady.points[i].spo2_dip));
+        }
+        if (steady.points[i].flags & VITALITY_FLAG_BREATH) n_breath++;
+    }
+    CHECK(n_spo2_pts == (int)days);
+    CHECK(n_breath == 0);
+    for (size_t d = 0; d < steady.n_daily; d++) {
+        CHECK_NEAR(steady.daily[d].spo2_night, 97.0, 1e-9);
+        CHECK(steady.daily[d].spo2_dip == 0.0);
+    }
+    /* 无血氧时 daily 的血氧字段为 NAN */
+    CHECK(isnan(base.daily[1].spo2_night) && isnan(base.daily[1].spo2_dip));
+
+    /* ② 第 4 日醒来前那一夜血氧不稳 → 当日 D_init 低于恒定血氧版本，且只在该夜打 BREATH；
+     *    次日（夜间恢复正常，但常态已被拉低一点）D_init 回到 ≥ 恒定版本 */
+    scenario_t sc2 = sc1;
+    sc2.spo2_bad_day = 4;
+    CHECK(run_batch(days, &sc2, NULL, &bad) == ENERGY_OK);
+    CHECK(isfinite(bad.daily[4].d_init) && isfinite(steady.daily[4].d_init));
+    /* x_SpO2 = −0.5（均值 −3 ≥ 1.5 满分、下跌 15% ≥ 10% 满分）→ Δ = gain·w_spo2·0.5 = 0.04 */
+    CHECK_NEAR(bad.daily[4].d_init, steady.daily[4].d_init - 0.04, 1e-9);
+    CHECK(bad.daily[4].wake_score < steady.daily[4].wake_score - 2.0);
+    CHECK(bad.daily[4].spo2_night < 95.0 && bad.daily[4].spo2_night > 93.0);
+    CHECK_NEAR(bad.daily[4].spo2_dip, 0.15, 0.02);
+    CHECK(bad.daily[5].d_init >= steady.daily[5].d_init);
+    CHECK(bad.daily[5].d_init > bad.daily[4].d_init);
+    for (size_t d = 0; d < 4; d++) CHECK(bad.daily[d].d_init == steady.daily[d].d_init);
+    n_breath = 0;
+    for (size_t i = 0; i < bad.n_points; i++) {
+        if (bad.points[i].flags & VITALITY_FLAG_BREATH) {
+            n_breath++;
+            CHECK((bad.points[i].flags & (VITALITY_FLAG_WAKE | VITALITY_FLAG_SPO2)) ==
+                  (VITALITY_FLAG_WAKE | VITALITY_FLAG_SPO2));
+            CHECK((int)floor(bad.points[i].t_h / 24.0) == 4);
+        }
+    }
+    CHECK(n_breath == 1);
+    /* 坏夜之后日间 V 整体低于恒定版本（D 均值回复，差距随时间收窄但不反号） */
+    const vitality_point_t *b8 = point_at(&bad, 4, 8.0), *s8 = point_at(&steady, 4, 8.0);
+    const vitality_point_t *b12 = point_at(&bad, 4, 12.0), *s12 = point_at(&steady, 4, 12.0);
+    CHECK(b8 && s8 && b12 && s12);
+    CHECK(b8->v < s8->v && b12->v <= s12->v && (s8->v - b8->v) > (s12->v - b12->v));
+
+    /* ③ 覆盖不足（30%）的夜：不用血氧，D_init 与恒定版本一致，不打 SPO2 标志，常态不计入 */
+    scenario_t sc3 = sc1;
+    sc3.spo2_sparse_day = 4;
+    CHECK(run_batch(days, &sc3, NULL, &sparse) == ENERGY_OK);
+    CHECK(sparse.daily[4].d_init == steady.daily[4].d_init);
+    CHECK(isnan(sparse.daily[4].spo2_night));
+    CHECK(sparse.habit.n_spo2_nights == (int)days - 1);
+    const vitality_point_t *w4 = NULL;
+    for (size_t i = 0; i < sparse.n_points; i++) {
+        if ((sparse.points[i].flags & VITALITY_FLAG_WAKE) && (int)floor(sparse.points[i].t_h / 24.0) == 4)
+            w4 = &sparse.points[i];
+    }
+    CHECK(w4 && (w4->flags & VITALITY_FLAG_SPO2) == 0);
+
+    /* ④ 只有 spo2_min 下跌（均值不变）：下跌占比 20% → x = −0.5·1 = −0.5 → Δ = −0.04（裁剪后同满分） */
+    scenario_t sc4 = sc1;
+    sc4.spo2_min_day = 4;
+    CHECK(run_batch(days, &sc4, NULL, &vmin) == ENERGY_OK);
+    CHECK_NEAR(vmin.daily[4].spo2_night, 97.0, 1e-9);
+    CHECK_NEAR(vmin.daily[4].spo2_dip, 0.20, 0.02);
+    CHECK_NEAR(vmin.daily[4].d_init, steady.daily[4].d_init - 0.04, 1e-9);
+
+    /* ⑤ 流式 = 批量（带血氧） */
+    {
+        size_t n;
+        energy_sample_t *smp = make_panel(days, &sc2, &n);
+        CHECK(smp != NULL);
+        vitality_ctx_t ctx;
+        vitality_ctx_init(&ctx, NULL, NULL);
+        double max_dd = 0.0;
+        for (size_t i = 0; i < n; i++) {
+            vitality_point_t vp;
+            energy_sample_t one = smp[i]; /* 同 test_stream_equals_batch：负荷/活动量用批量标定值 */
+            one.load = bad.energy.points[i].load;
+            one.activity = bad.energy.points[i].activity;
+            CHECK(vitality_ctx_step(&ctx, &one, NULL, &vp) == ENERGY_OK);
+            const double dd = fabs(vp.d - bad.points[i].d);
+            if (dd > max_dd) max_dd = dd;
+            CHECK((vp.flags & (VITALITY_FLAG_SPO2 | VITALITY_FLAG_BREATH)) ==
+                  (bad.points[i].flags & (VITALITY_FLAG_SPO2 | VITALITY_FLAG_BREATH)));
+        }
+        CHECK(max_dd < 1e-9);
+        vitality_habit_t h;
+        vitality_ctx_get_habit(&ctx, &h);
+        CHECK(h.n_spo2_nights == bad.habit.n_spo2_nights);
+        CHECK_NEAR(h.spo2_dip, bad.habit.spo2_dip, 1e-12);
+        /* 画像往返：含血氧常态 */
+        vitality_ctx_t c2;
+        vitality_ctx_init(&c2, NULL, NULL);
+        CHECK(vitality_ctx_set_habit(&c2, &h) == ENERGY_OK);
+        vitality_habit_t g;
+        vitality_ctx_get_habit(&c2, &g);
+        CHECK(g.n_spo2_nights == h.n_spo2_nights && g.spo2_mean == h.spo2_mean);
+        h.spo2_mean = 120.0;
+        CHECK(vitality_ctx_set_habit(&c2, &h) == ENERGY_EINVAL);
+        h.spo2_mean = 97.0;
+        h.n_spo2_nights = h.n_nights + 1;
+        CHECK(vitality_ctx_set_habit(&c2, &h) == ENERGY_EINVAL);
+        h.n_spo2_nights = 0;
+        CHECK(vitality_ctx_set_habit(&c2, &h) == ENERGY_OK);
+        vitality_ctx_get_habit(&c2, &g);
+        CHECK(isnan(g.spo2_mean) && isnan(g.spo2_dip));
+        free(smp);
+    }
+
+    /* ⑥ 非法血氧值（0 / 120 / 负数 / Inf）视为缺失：与无血氧逐位一致 */
+    {
+        size_t n;
+        energy_sample_t *smp = make_panel(days, &sc0, &n);
+        CHECK(smp != NULL);
+        for (size_t i = 0; i < n; i++) {
+            const double junk[4] = {0.0, 120.0, -5.0, INFINITY};
+            smp[i].spo2 = junk[i % 4];
+            smp[i].spo2_min = junk[(i + 1) % 4];
+        }
+        vitality_output_t o;
+        CHECK(vitality_compute(smp, n, NULL, NULL, &o) == ENERGY_OK);
+        CHECK(o.habit.n_spo2_nights == 0 && isnan(o.habit.spo2_mean));
+        for (size_t i = 0; i < n; i++) CHECK(o.points[i].v == base.points[i].v);
+        vitality_output_free(&o);
+        free(smp);
+    }
+
+    /* ⑦ 配置校验 */
+    {
+        vitality_config_t c;
+        vitality_config_default(&c);
+        c.morning.w_spo2 = NAN;
+        CHECK(vitality_config_validate(&c, NULL, 0) == ENERGY_EINVAL);
+        vitality_config_default(&c);
+        c.morning.spo2_min_cover = 1.5;
+        CHECK(vitality_config_validate(&c, NULL, 0) == ENERGY_EINVAL);
+        vitality_config_default(&c);
+        c.morning.spo2_dip_delta = 0.0;
+        CHECK(vitality_config_validate(&c, NULL, 0) == ENERGY_EINVAL);
+        /* w_spo2 = 0：有血氧也不影响 D_init */
+        vitality_config_default(&c);
+        c.morning.w_spo2 = 0.0;
+        vitality_output_t o;
+        CHECK(run_batch(days, &sc2, &c, &o) == ENERGY_OK);
+        CHECK(o.daily[4].d_init == steady.daily[4].d_init);
+        CHECK(isfinite(o.daily[4].spo2_night)); /* 统计照样给出 */
+        vitality_output_free(&o);
+    }
+
+    vitality_output_free(&base);
+    vitality_output_free(&steady);
+    vitality_output_free(&bad);
+    vitality_output_free(&sparse);
+    vitality_output_free(&vmin);
+}
+
 static void test_energy_residual_exposed(void)
 {
     /* energy_point_t.hr_resid：基线建立前 NAN，之后有限；夜间 / 日间都有 */
@@ -781,6 +980,7 @@ int main(void)
     test_invalid_and_edges();
     test_nan_fuzz_and_gaps();
     test_energy_residual_exposed();
+    test_spo2();
     if (g_fail) {
         printf("FAILED: %d of %d checks\n", g_fail, g_checks);
         return 1;

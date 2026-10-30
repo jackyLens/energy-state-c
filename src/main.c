@@ -5,7 +5,7 @@
  *   energy_cli panel.csv [--out out.csv] [--no-ekf] [--no-smooth] [--json]
  *
  * 输入 CSV（第一行是表头，列顺序无关）：
- *   t_h,tod,wake,light,deep,rem,hr,hrv_log,steps,kcal,stress,q_hr,q_hrv[,load,activity]
+ *   t_h,tod,wake,light,deep,rem,hr,hrv_log,steps,kcal,stress,q_hr,q_hrv[,load,activity,spo2,spo2_min]
  *   缺失值写 nan 或留空；load/activity 留空表示由库内部计算。
  *
  * 输出 CSV：t_h,tod,s,e,e_sd,energy,lower,upper,base,load,activity
@@ -110,6 +110,8 @@ static int load_panel(const char *path, energy_sample_t **out, size_t *n_out)
     const int iqhrv = find_col(&h, "q_hrv");
     const int iload = find_col(&h, "load");
     const int iact = find_col(&h, "activity");
+    const int ispo2 = find_col(&h, "spo2");
+    const int ispo2min = find_col(&h, "spo2_min");
 
     size_t cap = 2048, n = 0;
     energy_sample_t *arr = (energy_sample_t *)malloc(cap * sizeof(energy_sample_t));
@@ -148,6 +150,8 @@ static int load_panel(const char *path, energy_sample_t **out, size_t *n_out)
         s->q_hrv = (iqhrv >= 0 && iqhrv < nf) ? to_double(fields[iqhrv], 1.0) : 1.0;
         s->load = (iload >= 0 && iload < nf) ? to_double(fields[iload], -1.0) : -1.0;
         s->activity = (iact >= 0 && iact < nf) ? to_double(fields[iact], -1.0) : -1.0;
+        s->spo2 = (ispo2 >= 0 && ispo2 < nf) ? to_double(fields[ispo2], NAN) : NAN;
+        s->spo2_min = (ispo2min >= 0 && ispo2min < nf) ? to_double(fields[ispo2min], NAN) : NAN;
     }
     fclose(fp);
     *out = arr;
@@ -237,12 +241,12 @@ static int run_vitality(const energy_sample_t *samples, size_t n, const energy_c
     fprintf(stderr, "样本 %zu，天数 %zu，能量 %.1f–%.1f（均值 %.1f），精力 %.1f–%.1f（均值 %.1f）\n",
             vo.n_points, vo.n_daily, vo.energy.stats_min, vo.energy.stats_max, vo.energy.stats_mean,
             vo.stats_min, vo.stats_max, vo.stats_mean);
-    fprintf(stderr, "\n日期   起床精力  D_init   均值   最低   最高   运动  午睡  过载点  用户标记\n");
+    fprintf(stderr, "\n日期   起床精力  D_init   均值   最低   最高   运动  午睡  过载点  用户标记  夜间SpO2  下跌占比\n");
     for (size_t i = 0; i < vo.n_daily; i++) {
         const vitality_daily_t *d = &vo.daily[i];
-        fprintf(stderr, "%-6s %7.1f  %+6.3f  %5.1f  %5.1f  %5.1f  %4d  %4d  %6d  %8d\n",
+        fprintf(stderr, "%-6s %7.1f  %+6.3f  %5.1f  %5.1f  %5.1f  %4d  %4d  %6d  %8d  %8.1f  %8.3f\n",
                 d->date[0] ? d->date : "-", d->wake_score, d->d_init, d->mean, d->min, d->max,
-                d->n_exercise, d->n_nap, d->n_stress_samples, d->n_user_events);
+                d->n_exercise, d->n_nap, d->n_stress_samples, d->n_user_events, d->spo2_night, d->spo2_dip);
     }
     vitality_output_free(&vo);
     return 0;

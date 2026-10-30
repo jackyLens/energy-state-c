@@ -1,5 +1,5 @@
 /*
- * vitality.h —— 个体“精力”状态（能量之上的快层），v1.0
+ * vitality.h —— 个体“精力”状态（能量之上的快层），v1.1
  *
  * 能量 E(t) 回答“我还剩多少储备”（电池电量，小时–天级）；
  * 精力 V(t) 回答“我现在状态好不好”（信号强度，分钟–小时级）。
@@ -22,9 +22,16 @@
  *   用户手动标记（咖啡 / 冥想 / 压力事件 …）用 vitality_ctx_event 注入，锦上添花、不是必需。
  *
  * 晨起初始化：每次夜间睡眠结束，D 重置为
- *     D_init = g · [w1·x_ΔE + w2·x_HRV + w3·x_sleep]
- *   三项分别是“今晚能量回充量 / 醒前 1 小时 HRV / 睡眠结构（时长、深睡、碎片化）”相对
+ *     D_init = g · clip(w1·x_ΔE + w2·x_HRV + w3·x_sleep + w4·x_SpO2, ±0.5)
+ *   前三项分别是“今晚能量回充量 / 醒前 1 小时 HRV / 睡眠结构（时长、深睡、碎片化）”相对
  *   **本人**常态的偏差（库内在线学习），因此睡得比平时好 → 醒来高于均衡线，反之低于。
+ *   第四项（v1.1）是“夜间血氧平稳度”：整夜血氧均值、以及低于本夜中位数 ≥ 3 个百分点的
+ *   样本占比（瞬时下跌密度），两者都相对本人常态。生理依据：夜间通气不稳会伴随交感激活、
+ *   心率突升与微觉醒，分期算法常把这些仍标成“睡着”，但恢复质量已经打了折；血氧是这一
+ *   机制**原因侧**的独立观测，HR/HRV 只看到结果侧。饮酒、鼻塞、仰睡、高海拔、感冒都会
+ *   先体现在夜间血氧上。样本没有血氧（NAN / 0）时该项为 0，结果与 v1.0 逐位一致。
+ *   日间血氧**不参与**任何估计：健康人静息 SpO₂ 稳定在 96–99%（变化在传感器噪声之内），
+ *   疲劳 / 压力并不改变动脉血氧，而且日间手部活动伪迹大。
  *
  * 0–100 的两种刻度（都只跟自己比）：
  *   - vitality   = 100·V：“绝对自我刻度”，E 与 D 本身已相对个人基线；
@@ -53,7 +60,7 @@
  * ----------
  *   - V、V*、D 有界；无随机性；无全局状态；逐位可复现；
  *   - 单步常数开销（无随历史增长的循环；make bench：桌面 x86-64 -O2 下精力层增量约 4 µs/步）；
- *     vitality_ctx_t 在 x86-64 上 3736 B（含 energy_ctx_t 2344 B，以 sizeof 为准）；
+ *     vitality_ctx_t 在 x86-64 上约 3.9 KB（含 energy_ctx_t 2344 B，以 sizeof 为准）；
  *   - 事件检测只依据生理效应（负荷、活动量、残差），不识别原因；咖啡只能通过心率间接体现；
  *   - 夜间（主睡眠）不做观测更新，V 跟随均衡线并带 VITALITY_FLAG_SLEEP；
  *   - 个人常态（夜间回充量、睡眠结构、HRV）至少 1 晚后才用于晨起初始化，3 晚内带 LEARNING 标志；
@@ -68,7 +75,7 @@
 extern "C" {
 #endif
 
-#define VITALITY_VERSION "1.0.0"
+#define VITALITY_VERSION "1.1.0"
 const char *vitality_version(void);
 
 /* ------------------------------------------------------------------ */
@@ -132,6 +139,12 @@ typedef struct {
     double w_delta_e;     /* 0.4：夜间能量回充量相对本人常态 */
     double w_hrv;         /* 0.3：醒前 1 小时 HRV 相对本人夜间常态 */
     double w_sleep;       /* 0.3：睡眠结构（时长 / 深睡占比 / 碎片化）相对本人常态 */
+    double w_spo2;        /* 0.2：夜间血氧平稳度相对本人常态（样本无血氧时该项恒为 0）；
+                           * 四项加权和先裁到 ±0.5 再乘 gain，所以 |D_init| ≤ 0.2 不变 */
+    double spo2_dip_delta; /* 瞬时下跌判据：样本低值 ≤ 本夜中位数 − 3.0（百分点） */
+    double spo2_mean_scale; /* 均值差 1.5 个百分点记满分 */
+    double spo2_dip_scale;  /* 下跌占比差 0.10 记满分 */
+    double spo2_min_cover;  /* 有效血氧样本须覆盖 ≥ 50% 的睡眠样本且 ≥ 1 h，否则本夜不用血氧 */
     double sigma_hrv_night; /* HRV z 化尺度，0.22 */
     double lambda;        /* 常态的 EWMA 系数，0.20（约 5 晚记忆）；前 cold_nights 晚累计平均 */
     int cold_nights;      /* 3 */
@@ -190,6 +203,8 @@ int vitality_config_validate(const vitality_config_t *cfg, char *errbuf, size_t 
 #define VITALITY_FLAG_USER      512u  /* 本点注入了用户标记事件 */
 #define VITALITY_FLAG_NO_OBS    1024u /* 本点无可用观测（残差缺失 / 运动中 / 能量基线未建立） */
 #define VITALITY_FLAG_PCT_READY 2048u /* 分位刻度可用（≥ pct_min_days 个日间） */
+#define VITALITY_FLAG_BREATH    4096u /* 晨起点：昨夜血氧平稳度明显低于本人常态（x_SpO2 ≤ −0.25） */
+#define VITALITY_FLAG_SPO2      8192u /* 晨起点：本夜血氧覆盖充分、已参与初始化 */
 
 /* 四象限（产品文案用） */
 typedef enum {
@@ -205,6 +220,8 @@ typedef struct {
     double v_star;     /* 均衡线 [0,1] */
     double d;          /* 偏离量（本点观测更新后） */
     double d_init;     /* 晨起初始化值 D_init（仅 WAKE 点有效，其余 NAN） */
+    double spo2_night; /* 本夜血氧均值 %（仅 WAKE 且 SPO2 点有效，其余 NAN） */
+    double spo2_dip;   /* 本夜瞬时下跌样本占比 0–1（同上） */
     double d_sd;       /* D 的后验标准差 */
     double v;          /* V = clip(V* + D) [0,1]，未平滑 */
     double vitality;   /* 100·V（批量模式已做 smooth_minutes 平滑） */
@@ -223,6 +240,7 @@ typedef struct {
     char date[11];
     double wake_score;   /* 晨起初始化后第一点的 score；无则 NAN */
     double d_init;       /* 当日晨起 D_init；无则 NAN */
+    double spo2_night, spo2_dip; /* 当日晨起点的夜间血氧均值 / 下跌占比；无则 NAN */
     double mean, min, max; /* 日间（sleep_prob<0.5）score 的统计 */
     double peak_tod, dip_tod;
     int n_exercise, n_nap, n_stress_samples, n_user_events;
@@ -236,7 +254,10 @@ typedef struct {
     double sleep_h;     /* 典型主睡眠时长 */
     double deep_frac;   /* 典型深睡占比 */
     double wake_frac;   /* 典型夜间清醒占比（碎片化） */
+    double spo2_mean;   /* 典型夜间血氧均值 %（无血氧则 NAN） */
+    double spo2_dip;    /* 典型夜间瞬时下跌样本占比（无血氧则 NAN） */
     int n_nights;       /* 已学习夜数 */
+    int n_spo2_nights;  /* 其中有充分血氧覆盖的夜数 */
 } vitality_habit_t;
 
 typedef struct {
@@ -263,6 +284,8 @@ int vitality_compute(const energy_sample_t *samples, size_t n,
 /* 4. 流式                                                             */
 /* ------------------------------------------------------------------ */
 #define VITALITY_PCT_BINS 50
+#define VITALITY_SPO2_LO 70      /* 低于此值的血氧样本按 70 计（直方图下沿） */
+#define VITALITY_SPO2_BINS 31    /* 70..100，1% 一箱 */
 
 typedef enum {
     VITALITY_EVENT_CAFFEINE = 0,
@@ -296,6 +319,12 @@ typedef struct {
     int last_close_main;      /* 上次结束的是否为主睡眠（≥ min_sleep_h） */
     vitality_habit_t habit_before_close; /* 上次主睡眠更新常态前的快照（续睡时回滚重算） */
     int awake_between_n;      /* 两段之间清醒样本数（合并时计入碎片化） */
+    /* 夜间血氧（v1.1）：1% 分箱直方图 [VITALITY_SPO2_LO, 100]，常数内存求中位数与下跌占比 */
+    int spo2_hist[VITALITY_SPO2_BINS];
+    int spo2_n;
+    double spo2_sum;
+    double last_spo2_mean, last_spo2_dip; /* 最近一次晨起初始化用到的夜间血氧（无则 NAN） */
+    double last_x_spo2;       /* 最近一次晨起初始化的 x_SpO2（本夜无血氧则 NAN） */
     /* 事件检测 */
     int ex_run, ex_cool, ex_idle; /* 运动段样本数 / 结束后已平静连续样本数 / 结束后总样本数 */
     double ex_h;              /* 运动段累计时长 */

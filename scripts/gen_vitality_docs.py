@@ -23,21 +23,21 @@ DOCS = os.path.join(ROOT, "docs")
 # 实测数字（make test / make sanitize / make coverage / make bench，合成数据）
 NUMBERS = {
     "energy_checks": "81,794",
-    "vitality_checks": "27,445",
-    "cov_vitality": "93.1%",
-    "cov_vitality_lines": "694",
+    "vitality_checks": "37,897",
+    "cov_vitality": "93.7%",
+    "cov_vitality_lines": "766",
     "cov_energy": "97.0%",
-    "bench_energy_us": "4.52",
-    "bench_both_us": "8.66",
-    "bench_delta_us": "4.14",
-    "ctx_bytes": "3736",
+    "bench_energy_us": "4.56",
+    "bench_both_us": "8.62",
+    "bench_delta_us": "4.06",
+    "ctx_bytes": "3976",
     "ectx_bytes": "2344",
     "energy_version": "1.2.0",
-    "vitality_version": "1.0.0",
+    "vitality_version": "1.1.0",
 }
 
 FLAG = dict(SLEEP=1, LEARNING=2, GAP=4, WAKE=8, EXERCISE=16, NAP=32, AROUSAL=64, STRESS=128,
-            FATIGUE=256, USER=512, NO_OBS=1024, PCT_READY=2048)
+            FATIGUE=256, USER=512, NO_OBS=1024, PCT_READY=2048, BREATH=4096, SPO2=8192)
 
 
 def read_style(name):
@@ -50,7 +50,7 @@ def load_csv(path):
     rows = []
     with open(path, encoding="utf-8") as f:
         for r in csv.DictReader(f):
-            rows.append({k: (float(v) if k != "flags" else int(v)) for k, v in r.items()})
+            rows.append({k: (float(v) if k != "flags" else int(v)) for k, v in r.items() if v != ""})
     return rows
 
 
@@ -369,6 +369,7 @@ def technical(rows):
     caf0, caf1 = pick(rows, 3, 14.75), pick(rows, 3, 15.25)
     wake4 = next(r for r in rows if r["flags"] & FLAG["WAKE"] and 96 <= r["t_h"] < 120)
     wake3 = next(r for r in rows if r["flags"] & FLAG["WAKE"] and 72 <= r["t_h"] < 96)
+    wake5 = next(r for r in rows if r["flags"] & FLAG["WAKE"] and 120 <= r["t_h"] < 144)
 
     s1 = section("why", "01", "为什么要第二个状态量", f"""
     <p>能量 E 是慢变量：它回答"储备还剩多少"，由夜间恢复和日间消耗决定，一杯咖啡或一次午睡不会改变储备。但用户此刻的主观状态会变。精力层把这类<b>短时的、会自己消退的</b>偏离单独建模为 D，叠加在"能量 × 昼夜节律"的均衡线上：</p>
@@ -391,7 +392,7 @@ dD/dt = − D / τ_D(E) + Σ 事件脉冲 + 观测修正          <span class="c
 {figure(1, "级联：能量层 → 残差 → 精力层", fig_cascade(), "能量层的残差已扣除个人基线、昼夜节律、活动负荷与 E 自身的贡献，所以体质差异不进入精力：整体心率 +8 bpm，第 4 天起精力分差 < 3（test_constitution_invariance）。")}
     <div class="cols">
       <div class="card"><h4><span class="dot" style="background:#0e7a83"></span>精力层新增的量</h4>
-        <ul><li>隐状态 D 与其方差 P（标量）</li><li>个人常态 <code>vitality_habit_t</code>：夜间回充量、醒前 HRV、睡眠时长 / 深睡 / 碎片化（EWMA，可持久化）</li><li>50 桶的日间 V 分位直方图（按日历日指数衰减）</li></ul>
+        <ul><li>隐状态 D 与其方差 P（标量）</li><li>个人常态 <code>vitality_habit_t</code>：夜间回充量、醒前 HRV、睡眠时长 / 深睡 / 碎片化、夜间血氧均值 / 下跌占比（EWMA，可持久化）</li><li>本夜血氧 1% 分箱直方图（31 箱）</li><li>50 桶的日间 V 分位直方图（按日历日指数衰减）</li></ul>
       </div>
       <div class="card"><h4><span class="dot" style="background:#bf4520"></span>从能量层拿的量</h4>
         <ul><li>E、e_sd（折进精力带宽）</li><li>sleep_prob（睡眠段判定）、load、activity（观测权重 / 事件）</li><li>hr_resid、hrv_resid（观测）</li><li>昼夜节律形状 <code>energy_circadian()</code>（均衡线）</li></ul>
@@ -433,11 +434,12 @@ L &gt; 0.60 且 A ≥ 0.10 → w_act = 0（在运动，不用）      L &gt; 0.6
     </table>
     <div class="note warn"><b>关于咖啡：</b>示例里咖啡标记只抬了约 0.04 而不是 0.10——合成数据里心率没有相应升高，观测把它拉回来了。真实用户喝咖啡心率通常升 3–8 bpm，此时观测与标记同向。库不从数据里"识别"咖啡。</div>
 """)
-    s6 = section("morning", "06", "晨起初始化：三项都相对本人常态", f"""
+    s6 = section("morning", "06", "晨起初始化：四项都相对本人常态", f"""
     <pre>x1 = clip( (ΔE − ΔE̅) / 0.30, ±0.5 )                          <span class="c">今晚能量回充量 vs 本人常态</span>
 x2 = clip( (HRV_wake − HRV̅_wake) / 0.44, ±0.5 )               <span class="c">醒前 1 h 的 HRV vs 本人夜间常态</span>
 x3 = clip( 0.5·q_时长 + 0.25·q_深睡 − 0.25·q_碎片, ±0.5 )       <span class="c">时长差 2 h / 深睡与碎片化差 10 个百分点记满分</span>
-D_init = 0.40 · ( 0.4·x1 + 0.3·x2 + 0.3·x3 )                   <span class="c">|D_init| ≤ 0.2；没有常态的项记 0</span></pre>
+x4 = clip( 0.5·q_血氧均值 − 0.5·q_瞬时下跌, ±0.5 )              <span class="c">v1.1：夜间血氧平稳度（§7）；没有血氧时为 0</span>
+D_init = 0.40 · clip( 0.4·x1 + 0.3·x2 + 0.3·x3 + 0.2·x4, ±0.5 )  <span class="c">|D_init| ≤ 0.2；没有常态的项记 0</span></pre>
     <table>
       <thead><tr><th>规则</th><th>说明</th></tr></thead>
       <tbody>
@@ -449,12 +451,44 @@ D_init = 0.40 · ( 0.4·x1 + 0.3·x2 + 0.3·x3 )                   <span class="
     </table>
     <p class="small">示例实测：第 4 天 07:10 起床 D_init = {wake3['d_init']:+.3f}；第 5 天只睡 5 h，05:10 起床 D_init = <b>{wake4['d_init']:+.3f}</b>。幅度没有到 −0.2 是因为 x1 项部分抵消：熬到 0 点才睡的人入睡时 E 更低，5 h 回充量并不比平时少多少；真实数据若证实，可改用"醒时 E 相对常态"或提高 w_sleep。</p>
 """)
-    s7 = section("scale", "07", "两种 0–100 刻度，都只跟自己比", f"""
+    s6b = section("spo2", "07", "夜间血氧：只进晨起初始化，不进日间观测", f"""
+    <p>戒指在指端做反射式 PPG，灌注好、夜间手不动，血氧的可用性明显高于腕戴设备。但"测得准"不等于"该用"——先看生理上它和精力有没有关系：</p>
+    <table>
+      <thead><tr><th></th><th>日间静息 SpO₂</th><th>夜间 SpO₂</th></tr></thead>
+      <tbody>
+        <tr><td>和精力的生理关系</td><td>几乎没有。疲劳、压力、咖啡改变的是交感 / 副交感平衡与心率，不改变动脉血氧；健康人静息 SpO₂ 稳定在 96–99%，氧合曲线在这一段是平台，PaO₂ 变化几个 mmHg 都看不出来</td><td>有。夜间通气不稳 → 短暂缺氧 → 化学感受器驱动的交感激活、心率突升、微觉醒。微觉醒常短于分期算法的分辨率，分期仍标"睡着"，但恢复质量已经打折。饮酒、鼻塞、仰睡、高海拔、感冒都先体现在这里</td></tr>
+        <tr><td>信噪比</td><td>差：变化幅度（&lt; 1%）小于传感器噪声（约 ±2%），手部活动伪迹大</td><td>好：手不动、灌注稳定；只看相对本夜中位数的下跌，与绝对精度无关</td></tr>
+        <tr><td>与 HR / HRV 的关系</td><td>—</td><td>HR / HRV 看到的是交感激活这个<b>结果</b>；血氧看到的是通气不稳这个<b>原因</b>。两者相关但不冗余：心率突升可被分期 / 翻身解释掉，血氧下跌不会</td></tr>
+        <tr><td>结论</td><td><b>不用</b></td><td><b>用</b>，作为晨起初始化第四项，权重 0.2</td></tr>
+      </tbody>
+    </table>
+    <h3>本夜统计（常数内存）</h3>
+    <pre>每个睡眠样本：low = min(spo2, spo2_min)  → 1% 分箱直方图 [70, 100]；mean 累加
+整夜：median = 直方图中位数     dip = 占比( low ≤ median − 3 )     mean = 均值
+覆盖：有效样本 ≥ 50% 睡眠样本 且 ≥ 1 h，否则本夜不用血氧（x4 = 0，不打 SPO2 标志，常态不更新）</pre>
+    <h3>相对本人常态</h3>
+    <pre>q_均值 = clip( (mean − mean̅) / 1.5, ±1 )     高于常态的正向收益减半（SpO₂ 有天花板，"比平时更高"信息量小）
+q_下跌 = clip( (dip − dip̅) / 0.10, ±1 )       下跌占比比常态多 10 个百分点记满分
+x4 = clip( 0.5·q_均值 − 0.5·q_下跌, ±0.5 )     x4 ≤ −0.25 时晨起点打 BREATH 标志（"昨夜呼吸不如平时平稳"）</pre>
+    <table>
+      <thead><tr><th>规则</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>只看夜间</td><td>日间样本的 spo2 字段被完全忽略；不做任何日间观测更新</td></tr>
+        <tr><td>只跟自己比</td><td>均值与下跌占比都减去本人常态（前 3 个有血氧的夜累计平均，之后 EWMA λ = 0.2）；高原常住者的常态就是 92%，不会被当成"差"</td></tr>
+        <tr><td>不猜原因</td><td>库只说"昨夜血氧比你平时不稳"，不区分饮酒 / 鼻塞 / 海拔 / 任何健康状况，也不设任何绝对阈值（如 90%）</td></tr>
+        <tr><td>可退化</td><td>样本不传血氧（NAN / 0）、或 w_spo2 = 0 时，所有输出与 v1.0 逐位一致（<code>test_spo2</code>）；旧画像 <code>vitality_habit_t</code>（memset 0）可直接恢复</td></tr>
+        <tr><td>续睡合并</td><td>夜醒后 2 h 内续睡，血氧直方图随分期统计一起保留，按整夜重算</td></tr>
+      </tbody>
+    </table>
+    <p class="small">示例实测：第 6 天睡够 8 h，但前一夜血氧均值 {fmt(wake5['spo2_night'])}%（平时 97%）、瞬时下跌占比 {fmt(100*wake5['spo2_dip'],0)}%（平时 0%）→ x4 = −0.5，D_init = <b>{wake5['d_init']:+.3f}</b>（同样的夜不带血氧时 D_init = 0.000），起床精力 {fmt(wake5['vitality'])}，均衡线 {fmt(100*wake5['v_star'])}。幅度上限是 0.04（0.40 × 0.2 × 0.5）：血氧被刻意放在"修正项"的位置，不会单独决定一天的起点。</p>
+    <div class="note warn"><b>为什么不把血氧做成日间观测通道？</b>一旦加进去，卡尔曼更新会把传感器噪声当成状态变化：日间 ±2% 的抖动折算成 z 后与心率通道同量级，而它不携带任何精力信息，只会稀释真正的观测。用了不会更准，只会更吵。</div>
+""")
+    s7 = section("scale", "08", "两种 0–100 刻度，都只跟自己比", f"""
 {figure(4, "vitality 与 percentile", fig_scales(), "score_mode = 0 取 vitality，1 取 percentile（学习期自动退回 vitality），2 取两者平均。")}
     <pre>d_sd = sqrt( P + (V*/E)² · e_sd² )             lower / upper = 100 · clip( V ∓ 1.96 · d_sd )</pre>
     <p class="small">能量层的不确定性按 V 对 E 的灵敏度折进精力带宽；冷启动时带宽大，随能量层基线建立而收窄。</p>
 """)
-    s8 = section("api", "08", "接口", f"""
+    s8 = section("api", "09", "接口", f"""
     <pre><span class="c">/* 流式：内部自带 energy_ctx_t */</span>
 vitality_ctx_t vc;
 vitality_ctx_init(&amp;vc, &amp;ecfg, &amp;vcfg);                 <span class="c">/* 配置可为 NULL */</span>
@@ -484,11 +518,13 @@ vitality_output_free(&amp;out);
         <tr><td><code>EXERCISE</code> / <code>NAP</code> / <code>FATIGUE</code> / <code>USER</code></td><td>本点注入了对应脉冲 / 拖拽</td></tr>
         <tr><td><code>AROUSAL</code> / <code>STRESS</code></td><td>轻度唤醒 / 过载（文案用）</td></tr>
         <tr><td><code>PCT_READY</code></td><td>分位刻度可用（≥ 3 个日间）</td></tr>
+        <tr><td><code>SPO2</code> / <code>BREATH</code></td><td>晨起点：本夜血氧覆盖充分、已参与初始化（<code>spo2_night / spo2_dip</code> 字段有效）/ 昨夜血氧平稳度明显低于本人常态</td></tr>
       </tbody>
     </table>
+    <p class="small">样本新增两个可选字段：<code class="inl">spo2</code>（窗口均值 %）与 <code class="inl">spo2_min</code>（窗口最低值 %），缺失填 NAN；能量层不读它们。CSV 对应列名 <code class="inl">spo2, spo2_min</code>。</p>
     <p class="small">非法配置：<code class="inl">vitality_config_validate</code> 逐项范围检查，<code class="inl">vitality_compute</code> 返回 <code class="inl">ENERGY_EINVAL</code>，流式上下文每步返回错误；时间倒退返回 <code class="inl">ENERGY_EDOMAIN</code>；NaN 输入按缺失处理（<code class="inl">test_nan_fuzz</code>）。</p>
 """)
-    s9 = section("verify", "09", "验证：数字有出处", f"""
+    s9 = section("verify", "10", "验证：数字有出处", f"""
     <div class="stats">
       <div class="stat g"><div class="n">{N['vitality_checks']}</div><div class="l">精力层测试断言（能量层另有 {N['energy_checks']}）</div></div>
       <div class="stat t"><div class="n">{N['cov_vitality']}</div><div class="l">vitality.c 行覆盖（gcov，{N['cov_vitality_lines']} 行）</div></div>
@@ -505,16 +541,16 @@ vitality_output_free(&amp;out);
         <tr><td><code>make check</code>（Python 对照）</td><td>本环境缺少 Python 参考实现，未运行；精力层目前没有 Python 参考</td></tr>
       </tbody>
     </table>
-    <p class="small">测试覆盖：默认参数与非法参数；子函数（τ、均衡线、倒 U、裁剪、象限）；有界与睡眠中无观测；流式 == 批量；事件位置 / 方向 / 幅度与日汇总；用户标记与上限；晨起初始化（短睡为负、首晚为 0、学习期退出、常态持久化）；续睡合并；三种 score_mode；体质不变性；开环单调；NaN 与 3 h 缺口；能量层残差暴露。</p>
+    <p class="small">测试覆盖：默认参数与非法参数；子函数（τ、均衡线、倒 U、裁剪、象限）；有界与睡眠中无观测；流式 == 批量；事件位置 / 方向 / 幅度与日汇总；用户标记与上限；晨起初始化（短睡为负、首晚为 0、学习期退出、常态持久化）；续睡合并；三种 score_mode；体质不变性；开环单调；NaN 与 3 h 缺口；能量层残差暴露；夜间血氧（恒定血氧与无血氧逐位一致、坏夜 D_init −0.04 且只打一次 BREATH、覆盖 30% 的夜被忽略、仅 spo2_min 下跌同样生效、非法值视为缺失、流式 == 批量、画像往返、w_spo2 = 0 退化）。</p>
     <div class="note hot"><b>全部数字来自合成数据。</b>幅度参数（a_nap 0.15、a_exercise 0.12、z_c 2.8 等）需要在真实佩戴数据上用即时自评（"此刻精神如何 1–5"）校准；文档中的曲线是模型行为的展示，不是对真实用户的验证结果。</div>
 """)
-    s10 = section("limits", "10", "边界", """
+    s10 = section("limits", "11", "边界", """
     <div class="cols">
       <div class="card"><h4><span class="dot" style="background:#a83f63"></span>没做的</h4>
         <ul><li>识别咖啡 / 冥想 / 压力事件的原因（只接受用户标记）</li><li>跨用户的任何统计或排名</li><li>离线参数拟合（与能量层一样放在 Python 端）</li><li>医学用途</li></ul>
       </div>
       <div class="card"><h4><span class="dot" style="background:#a8650f"></span>需要真实数据决定的</h4>
-        <ul><li>短睡场景下 D_init 的 ΔE 项是否该换成"醒时 E 相对常态"</li><li>清醒后首小时的残差是否要降权（能量层"心率随 E"假设的伴随现象）</li><li>倒 U 零点 z_c 与各事件幅度</li><li>分位窗口 28 天是否合适（轮班 / 出差）</li></ul>
+        <ul><li>短睡场景下 D_init 的 ΔE 项是否该换成"醒时 E 相对常态"</li><li>清醒后首小时的残差是否要降权（能量层"心率随 E"假设的伴随现象）</li><li>倒 U 零点 z_c 与各事件幅度</li><li>分位窗口 28 天是否合适（轮班 / 出差）</li><li>血氧项权重 0.2 与下跌判据 3 个百分点（取决于设备的 5 min 聚合方式；给得出 spo2_min 时更灵敏）</li></ul>
       </div>
     </div>
 """)
@@ -531,13 +567,13 @@ vitality_output_free(&amp;out);
   </div>
 """
     toc = [("why", "1 为什么"), ("arch", "2 级联结构"), ("step", "3 一步之内"), ("obs", "4 观测"), ("events", "5 事件"),
-           ("morning", "6 晨起初始化"), ("scale", "7 刻度"), ("api", "8 接口"), ("verify", "9 验证"), ("limits", "10 边界")]
+           ("morning", "6 晨起初始化"), ("spo2", "7 夜间血氧"), ("scale", "8 刻度"), ("api", "9 接口"), ("verify", "10 验证"), ("limits", "11 边界")]
     return page("energy-state-c 技术说明 · 精力层", read_style("technical.html"),
                 f"energy-state-c · technical note · vitality v{N['vitality_version']}",
                 "在能量之上，再算一条精力",
-                "能量回答“储备还剩多少”，精力回答“此刻用得出来多少”。精力层把能量层解释不了的心率 / HRV 残差、运动与小睡的回弹、睡眠质量相对本人常态的偏差，建模成一个会自己消退的偏离量 D，叠加在“能量 × 昼夜节律”的均衡线上。",
+                "能量回答“储备还剩多少”，精力回答“此刻用得出来多少”。精力层把能量层解释不了的心率 / HRV 残差、运动与小睡的回弹、睡眠质量与夜间血氧平稳度相对本人常态的偏差，建模成一个会自己消退的偏离量 D，叠加在“能量 × 昼夜节律”的均衡线上。",
                 ["<b>C99</b> + libm", "级联于 energy.c", "<b>1</b> 个标量隐状态", "批量 <b>+</b> 流式"],
-                toc, s1 + s2 + s3 + s4 + s5 + s6 + s7 + s8 + s9 + s10,
+                toc, s1 + s2 + s3 + s4 + s5 + s6 + s6b + s7 + s8 + s9 + s10,
                 f"energy-state-c · vitality v{N['vitality_version']} / energy v{N['energy_version']} · C99 · 无第三方依赖",
                 "技术说明 · 图表基于真实实现与实测（合成）数据", cover)
 
@@ -551,11 +587,13 @@ def product(rows):
             (15.25, "咖啡标记", "#6d4fc4"), (18.5833, "跑步后", "#2c7a4b")]
     ann4 = [(5.1667, "只睡 5 小时，起床", "#71768a"), (14.5, "午后低谷", "#bf4520")]
     w4 = next(r for r in rows if r["flags"] & FLAG["WAKE"] and 96 <= r["t_h"] < 120)
+    w5 = next(r for r in rows if r["flags"] & FLAG["WAKE"] and 120 <= r["t_h"] < 144)
+    ann5 = [(7.1667, "起床（昨夜血氧不稳）", "#a83f63"), (10.0, "上午", "#0e7a83")]
     p3, p4 = pick(rows, 3, 14.5), pick(rows, 4, 14.5)
     s1 = section("what", "01", "它是什么，不是什么", """
     <div class="cols">
       <div class="card"><h4><span class="dot" style="background:#0e7a83"></span>它是</h4>
-        <ul><li>一条和能量同图的第二条曲线：<b>此刻用得出来多少</b></li><li>由你自己的心率、HRV、活动、睡眠相对<b>你自己的常态</b>推算</li><li>会对午睡、运动后的回弹、下午的提神、连续紧张的下压作出反应，然后自己消退</li><li>一个 0–100 的数，外加一句四象限文案</li></ul>
+        <ul><li>一条和能量同图的第二条曲线：<b>此刻用得出来多少</b></li><li>由你自己的心率、HRV、活动、睡眠、夜间血氧相对<b>你自己的常态</b>推算</li><li>会对午睡、运动后的回弹、下午的提神、连续紧张的下压作出反应，然后自己消退</li><li>一个 0–100 的数，外加一句四象限文案</li></ul>
       </div>
       <div class="card"><h4><span class="dot" style="background:#bf4520"></span>它不是</h4>
         <ul><li>不是和别人比的排名——库里没有任何跨人数据</li><li>不是情绪、注意力或任何健康状况的判断</li><li>不知道你喝了什么、做了什么：咖啡 / 冥想 / 压力事件需要你手动标记，不标记就只通过心率间接体现</li><li>没有数据时不会编：睡觉、缺口、运动中都回到均衡线</li></ul>
@@ -566,9 +604,10 @@ def product(rows):
     <p>下面两张图是示例程序 <code class="inl">make example</code> 的真实输出（合成数据）。赤陶色是能量，青色是精力，灰色虚线是精力的均衡线——没有任何事情发生时精力应该在的位置。</p>
 {figure(1, "事件日：唤醒、午睡、咖啡标记、跑步", fig_dual_track(rows, 3, "第 4 天（事件日）", ann3), f"午睡 20 分钟后精力由 {fmt(nap_before['vitality'])} 回到 {fmt(nap_after['vitality'])}，随后约 1 小时衰回均衡线；傍晚跑步期间不用心率做观测，结束平复后回弹 {fmt(ex_before['vitality'])} → {fmt(ex_after['vitality'])}。能量这条线对这些都几乎没有反应——这正是分成两条线的理由。")}
 {figure(2, "短睡日：只睡 5 小时", fig_dual_track(rows, 4, "第 5 天（只睡 5 h）", ann4), f"睡得少，能量起点低，精力的均衡线也随之整体下移。晨起 {int(w4['tod']):02d}:{int(round((w4['tod']%1)*60)):02d} 精力 {fmt(w4['vitality'])}，均衡线 {fmt(100*w4['v_star'])}，起床偏置 D_init = {w4['d_init']:+.3f}——略低于均衡线但幅度不大；14:30 能量 {fmt(p4['energy'])}（前一日同刻 {fmt(p3['energy'])}）、精力 {fmt(p4['vitality'])}（前一日 {fmt(p3['vitality'])}）。精力这天整体偏低，主要是均衡线跟着能量一起下移；起床偏置本身只占其中一小部分，对应的体感是起床时比平时更没劲一点。")}
+{figure(3, "血氧不稳的夜：睡够了，但起床偏低一点", fig_dual_track(rows, 5, "第 6 天（夜间血氧不稳）", ann5), f"这一夜睡满 8 小时，分期和平时一样，但戒指记录的夜间血氧均值 {fmt(w5['spo2_night'])}%（平时 97%），有 {fmt(100*w5['spo2_dip'],0)}% 的时段出现瞬时下跌（平时没有）。晨起偏置 D_init = {w5['d_init']:+.3f}，起床精力 {fmt(w5['vitality'])}（均衡线 {fmt(100*w5['v_star'])}）；同样的夜若不带血氧，偏置为 0。这是一个修正项：最多只影响起床起点约 4 分，之后照常由白天的数据接管。")}
 """)
     s3 = section("quad", "03", "两条线怎么一起读：四象限", f"""
-{figure(3, "能量 × 精力", fig_quadrants(), "阈值默认 50 / 50，可按产品需要调整。文案只描述状态与建议，不下任何判断。")}
+{figure(4, "能量 × 精力", fig_quadrants(), "阈值默认 50 / 50，可按产品需要调整。文案只描述状态与建议，不下任何判断。")}
     <table>
       <thead><tr><th>用户的一天</th><th>能量</th><th>精力</th><th>可以说的话</th></tr></thead>
       <tbody>
@@ -580,7 +619,7 @@ def product(rows):
     </table>
 """)
     s4 = section("scale", "04", "0–100 怎么读", f"""
-{figure(4, "两种刻度", fig_scales(), "第一种立即可用；第二种需要先积累 3 个白天，之后文案可以说“比你 80% 的时候好”。")}
+{figure(5, "两种刻度", fig_scales(), "第一种立即可用；第二种需要先积累 3 个白天，之后文案可以说“比你 80% 的时候好”。")}
     <div class="note"><b>只跟自己比。</b>两种刻度的参照都是这个人自己：能量相对自己的基线，精力相对自己的均衡线，分位相对自己过去约四周的白天。换一个静息心率 55 的人和一个 75 的人，各自的分数口径是一样的——这是模型假设，也是产品口径。</div>
     <table>
       <thead><tr><th>阶段</th><th>精力能显示什么</th></tr></thead>
@@ -607,7 +646,7 @@ def product(rows):
     s6 = section("say", "06", "能说与不能说", """
     <div class="cols">
       <div class="card"><h4><span class="dot" style="background:#2c7a4b"></span>可以说</h4>
-        <ul><li>"此刻的精力大约 68，比你 80% 的时候好"</li><li>"午睡后回升了 13 分"</li><li>"精神不错，但储备不足，别透支"</li><li>"最近三天的起床精力都偏低"</li></ul>
+        <ul><li>"此刻的精力大约 68，比你 80% 的时候好"</li><li>"午睡后回升了 13 分"</li><li>"精神不错，但储备不足，别透支"</li><li>"最近三天的起床精力都偏低"</li><li>"昨夜呼吸不如平时平稳，起床起点低了约 4 分"</li></ul>
       </div>
       <div class="card"><h4><span class="dot" style="background:#bf4520"></span>不能说</h4>
         <ul><li>"你比 70% 的同龄人精力好"（没有跨人数据，也不该有）</li><li>"你的注意力 / 情绪 / 健康如何"</li><li>"检测到你喝了咖啡"（不识别原因）</li><li>任何"测量 / 判定 / 预警"口吻</li></ul>
@@ -622,6 +661,8 @@ def product(rows):
         <tr><td><b>为什么睡觉时精力曲线是平的？</b></td><td>睡觉时不做观测，精力跟随均衡线。醒来那一刻才根据这一夜相对你常态的好坏，给一个起点。</td></tr>
         <tr><td><b>第一天为什么看不到"比你 x% 的时候好"？</b></td><td>分位需要至少 3 个白天的数据；之前显示的是绝对刻度。</td></tr>
         <tr><td><b>我跑步时精力为什么没有涨？</b></td><td>运动中心率不能当作状态信号，这段不观测；平复后才给回弹。</td></tr>
+        <tr><td><b>戒指测血氧很准，为什么白天的血氧不参与？</b></td><td>白天安静状态下血氧几乎是一条直线，困不困、累不累都不改变它——它不携带精力信息。夜里不一样：呼吸不平稳的时段会伴随心跳突升和短暂的浅醒，分期可能仍然显示"睡着"，但恢复质量已经打折。所以只用夜间血氧，而且只跟你自己平时的夜比。</td></tr>
+        <tr><td><b>"昨夜血氧不如平时平稳"是在说健康问题吗？</b></td><td>不是。它只是一个相对你自己常态的比较，不设任何绝对阈值，也不区分原因——喝了酒、鼻塞、仰睡、换了海拔都会这样。文案保持在"昨晚恢复打了折扣，今天起点低一点"的范围内。</td></tr>
         <tr><td><b>这些数字在真实用户上验证过吗？</b></td><td>还没有。目前所有参数和图都来自合成数据；上线前需要用即时自评校准幅度。</td></tr>
       </tbody>
     </table>

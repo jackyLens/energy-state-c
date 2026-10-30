@@ -155,6 +155,8 @@ void energy_sample_init(energy_sample_t *s)
     s->q_hrv = 1.0;
     s->load = -1.0;
     s->activity = -1.0;
+    s->spo2 = NAN;
+    s->spo2_min = NAN;
 }
 
 void energy_params_default(energy_params_t *p)
