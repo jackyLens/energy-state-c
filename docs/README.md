@@ -29,36 +29,8 @@
 
 精力技术说明里的五张图：级联结构、一步流水线、倒 U 变换 u(z)、两种 0–100 刻度；产品说明里的五张图：事件日、短睡日与血氧不稳夜的能量/精力双轨曲线（`build/vitality_demo.csv` 真实输出）、四象限、刻度。
 
-## 重新生成 PDF
-
-需要 Chrome / Chromium：
-
-```bash
-make docs                     # 自动找 Chrome/Chromium
-make docs CHROME=/path/to/chrome
-```
-
-或手动：
-
-```bash
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  --headless=new --no-pdf-header-footer \
-  --print-to-pdf=docs/technical.pdf docs/technical.html
-```
-
-## 精力文档的生成
-
-`vitality_*.html` 由 `scripts/gen_vitality_docs.py` 生成（图中曲线取自 `make example` 的 CSV），
-改文案请改脚本而不是 HTML：
-
-```bash
-make example && ./build/vitality_demo --csv build/vitality_demo.csv
-python3 scripts/gen_vitality_docs.py build/vitality_demo.csv
-make docs
-```
 
 ## 维护约定
 
 - 文档里的数字（测试断言数等）与仓库实测保持一致；改动后同步更新技术说明与 `gen_vitality_docs.py` 的 `NUMBERS`。
 - 图里的数值来自 `data/sample_panel.csv` 的真实输出；换样例数据后需要重新生成曲线路径。
-- 修改文案时不要出现“测量 / 诊断 / 治疗”等措辞（见产品说明 §6）。
