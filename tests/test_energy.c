@@ -5,6 +5,7 @@
  */
 
 #include "energy.h"
+#include "../src/energy_internal.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -60,8 +61,6 @@ static energy_sample_t *make_panel(size_t days, size_t *n_out)
         s[i].stress = 0.25;
         s[i].q_hr = 1.0;
         s[i].q_hrv = 1.0;
-        s[i].load = -1.0;
-        s[i].activity = -1.0;
     }
     *n_out = n;
     return s;
@@ -244,11 +243,9 @@ static void test_stream_equals_batch(void)
     energy_ctx_t ctx;
     energy_ctx_init(&ctx, &cfg);
     for (size_t i = 0; i < n; i++) {
-        energy_sample_t one = s[i];
-        one.load = out.points[i].load;
-        one.activity = out.points[i].activity;
         energy_point_t p;
-        CHECK(energy_ctx_step(&ctx, &one, &p) == ENERGY_OK);
+        CHECK(energy_ctx_step_fixed(&ctx, &s[i], out.points[i].load, out.points[i].activity, &p) ==
+              ENERGY_OK);
         CHECK_NEAR(p.s, out.points[i].s, 1e-12);
         CHECK_NEAR(p.e, out.points[i].e, 1e-12);
         CHECK_NEAR(p.e_sd, out.points[i].e_sd, 1e-12);
@@ -325,8 +322,6 @@ static void test_invalid_args(void)
         s[i].tod = s[i].t_h;
         s[i].q_hr = 1.0;
         s[i].q_hrv = 1.0;
-        s[i].load = -1.0;
-        s[i].activity = -1.0;
     }
     energy_output_t out;
     energy_config_t cfg;
@@ -367,8 +362,6 @@ static void test_stream_edges(void)
     a.hrv_log = log(45.0);
     a.q_hr = 1.0;
     a.q_hrv = 1.0;
-    a.load = 0.0;
-    a.activity = 0.0;
 
     energy_point_t p;
     CHECK(energy_ctx_step(&ctx, &a, &p) == ENERGY_OK);
@@ -391,12 +384,10 @@ static void test_stream_edges(void)
 
 
 /* 用观测模型反推一个“与状态一致”的日间 HR，避免测试让滤波器一路撞边界 */
-static double synth_day_hr(const energy_config_t *cfg, const energy_sample_t *s, double e)
+static double synth_day_hr(const energy_config_t *cfg, const energy_sample_t *s, double a, double e)
 {
     const double w = 2.0 * M_PI / 24.0;
     const double t = s->tod;
-    const double a = (s->activity >= 0.0) ? s->activity
-                                          : energy_activity_step(s->steps, s->kcal, cfg->load.steps_ref);
     return cfg->obs.hr_day[0] + cfg->obs.hr_day[1] * e + cfg->obs.hr_day[2] * a +
            cfg->obs.hr_day[3] * cos(w * t) + cfg->obs.hr_day[4] * sin(w * t) +
            cfg->obs.hr_day[5] * cos(2 * w * t) + cfg->obs.hr_day[6] * sin(2 * w * t);
@@ -422,11 +413,9 @@ static void test_s_clamp(void)
     s.hrv_log = log(20.0);
     s.q_hr = 1.0;
     s.q_hrv = 1.0;
-    s.load = 0.2;
-    s.activity = 0.1;
 
     energy_point_t p;
-    CHECK(energy_ctx_step(&ctx, &s, &p) == ENERGY_OK);
+    CHECK(energy_ctx_step_fixed(&ctx, &s, 0.2, 0.1, &p) == ENERGY_OK);
     CHECK(ctx.s >= 0.0 && ctx.s <= 1.0);
     CHECK(ctx.e >= 0.0 && ctx.e <= 1.0);
 }
@@ -456,8 +445,6 @@ static void run_gate_case(double robust_nu, double *diff_out, double *track_out)
         base[k].q_hrv = 1.0;
         base[k].hr = NAN;
         base[k].hrv_log = NAN;
-        base[k].load = 0.3;  /* 固定负荷，保证开环真值与 EKF 用同一套动力学 */
-        base[k].activity = 0.3;
         base[k].stress = 0.2;
     }
 
@@ -467,12 +454,13 @@ static void run_gate_case(double robust_nu, double *diff_out, double *track_out)
     energy_ctx_init(&ol, &cfg_ol);
     double truth[K];
     energy_point_t p;
+    /* 固定负荷 / 活动量 0.3，保证开环真值与 EKF 用同一套动力学 */
     for (int k = 0; k < K; k++) {
-        energy_ctx_step(&ol, &base[k], &p);
+        energy_ctx_step_fixed(&ol, &base[k], 0.3, 0.3, &p);
         truth[k] = p.e;
     }
     for (int k = 0; k < K; k++) {
-        base[k].hr = synth_day_hr(&cfg, &base[k], truth[k]);
+        base[k].hr = synth_day_hr(&cfg, &base[k], 0.3, truth[k]);
         base[k].hrv_log = 3.40;
     }
 
@@ -481,10 +469,10 @@ static void run_gate_case(double robust_nu, double *diff_out, double *track_out)
     energy_ctx_init(&b, &cfg);
     energy_point_t pa, pb;
     for (int k = 0; k < K; k++) {
-        energy_ctx_step(&a, &base[k], &pa);
+        energy_ctx_step_fixed(&a, &base[k], 0.3, 0.3, &pa);
         energy_sample_t sp = base[k];
         if (k == 30) sp.hr = 220.0;
-        energy_ctx_step(&b, &sp, &pb);
+        energy_ctx_step_fixed(&b, &sp, 0.3, 0.3, &pb);
     }
     unsigned long na = 0, ga = 0, nb = 0, gb = 0;
     energy_ctx_gate_stats(&a, &na, &ga);
@@ -525,20 +513,17 @@ static void day_night_case(const energy_config_t *cfg, double *e_night, double *
     night.hrv_log = 3.60;
     night.q_hr = 1.0;
     night.q_hrv = 1.0;
-    night.load = 0.2;
-    night.activity = 0.0;
 
     day = night;
     day.tod = 14.0;
     day.stage[ENERGY_LIGHT] = 0.0;
-    day.activity = 0.3;
 
     energy_ctx_t a, b;
     energy_ctx_init(&a, cfg);
     energy_ctx_init(&b, cfg);
     energy_point_t pn, pd;
-    CHECK(energy_ctx_step(&a, &night, &pn) == ENERGY_OK);
-    CHECK(energy_ctx_step(&b, &day, &pd) == ENERGY_OK);
+    CHECK(energy_ctx_step_fixed(&a, &night, 0.2, 0.0, &pn) == ENERGY_OK);
+    CHECK(energy_ctx_step_fixed(&b, &day, 0.2, 0.3, &pd) == ENERGY_OK);
     *e_night = pn.e;
     *e_day = pd.e;
 }
@@ -660,16 +645,14 @@ static void test_misc_api(void)
 
 static void test_sample_init_and_auto_activity(void)
 {
-    /* 初始化：q 默认 1、hr/hrv 缺失、load/activity 交给库 */
+    /* 初始化：q 默认 1、hr/hrv 缺失 */
     energy_sample_t s0;
     memset(&s0, 0xAA, sizeof(s0)); /* 脏内存 */
     energy_sample_init(&s0);
     CHECK(s0.q_hr == 1.0 && s0.q_hrv == 1.0);
     CHECK(isnan(s0.hr) && isnan(s0.hrv_log));
-    CHECK(s0.load < 0.0 && s0.activity < 0.0);
 
-    /* 流式：activity=-1（自动）与显式给同一个值，必须逐点一致。
-     * 这曾经是个 bug：流式只把自动活动量写进输出，没写回观测方程。 */
+    /* 流式：库自动算的活动量与显式固定同一个值，必须逐点一致。 */
     size_t n = 0;
     energy_sample_t *panel = make_panel(2, &n);
     CHECK(panel != NULL);
@@ -680,12 +663,9 @@ static void test_sample_init_and_auto_activity(void)
     energy_ctx_init(&b, &cfg);
     energy_point_t pa, pb;
     for (size_t i = 0; i < n; i++) {
-        energy_sample_t sa = panel[i];
-        energy_sample_t sb = panel[i];
-        sa.activity = -1.0;
-        sb.activity = energy_activity_step(panel[i].steps, panel[i].kcal, cfg.load.steps_ref);
-        CHECK(energy_ctx_step(&a, &sa, &pa) == ENERGY_OK);
-        CHECK(energy_ctx_step(&b, &sb, &pb) == ENERGY_OK);
+        const double act = energy_activity_step(panel[i].steps, panel[i].kcal, cfg.load.steps_ref);
+        CHECK(energy_ctx_step(&a, &panel[i], &pa) == ENERGY_OK);
+        CHECK(energy_ctx_step_fixed(&b, &panel[i], -1.0, act, &pb) == ENERGY_OK);
         CHECK_NEAR(pa.e, pb.e, 1e-12);
         CHECK_NEAR(pa.energy, pb.energy, 1e-12);
     }
@@ -694,25 +674,30 @@ static void test_sample_init_and_auto_activity(void)
 
 static void test_batch_honors_provided_load(void)
 {
-    /* 批量接口必须尊重调用方传入的 load/activity（>=0 直接用） */
+    /* 内部测试入口：固定的 load/activity（>=0）必须被批量路径采用 */
     size_t n = 0;
     energy_sample_t *low = make_panel(1, &n);
     energy_sample_t *high = make_panel(1, &n);
     energy_sample_t *auto_panel = make_panel(1, &n);
     CHECK(low && high && auto_panel);
+    double *fl_lo = (double *)malloc(n * sizeof(double));
+    double *fl_hi = (double *)malloc(n * sizeof(double));
+    double *fa_0 = (double *)malloc(n * sizeof(double));
+    double *fa_9 = (double *)malloc(n * sizeof(double));
+    double *fl_3 = (double *)malloc(n * sizeof(double));
+    CHECK(fl_lo && fl_hi && fa_0 && fa_9 && fl_3);
     for (size_t i = 0; i < n; i++) {
-        low[i].load = 0.05;
-        high[i].load = 0.95;
-        low[i].activity = 0.0;
-        high[i].activity = 0.0;
-        auto_panel[i].load = -1.0;
-        auto_panel[i].activity = -1.0;
+        fl_lo[i] = 0.05;
+        fl_hi[i] = 0.95;
+        fa_0[i] = 0.0;
+        fa_9[i] = 0.9;
+        fl_3[i] = 0.3;
     }
     energy_config_t cfg;
     energy_config_default(&cfg);
     energy_output_t ol, oh, oa;
-    CHECK(energy_compute(low, n, &cfg, &ol) == ENERGY_OK);
-    CHECK(energy_compute(high, n, &cfg, &oh) == ENERGY_OK);
+    CHECK(energy_compute_fixed(low, n, &cfg, fl_lo, fa_0, &ol) == ENERGY_OK);
+    CHECK(energy_compute_fixed(high, n, &cfg, fl_hi, fa_0, &oh) == ENERGY_OK);
     CHECK(energy_compute(auto_panel, n, &cfg, &oa) == ENERGY_OK);
 
     /* 传 0.05 与 0.95 必须得到不同的曲线，且低负荷能量更高 */
@@ -721,16 +706,12 @@ static void test_batch_honors_provided_load(void)
     CHECK_NEAR(oh.points[100].load, 0.95, 1e-12);
     CHECK(fabs(oa.stats_mean - oh.stats_mean) > 1e-9); /* 自动负荷与显式 0.95 不同 */
 
-    /* 显式 activity 也必须生效：只改 activity，日间观测不同 → 曲线不同 */
+    /* 固定 activity 也必须生效：只改 activity，日间观测不同 → 曲线不同 */
     energy_sample_t *a0 = make_panel(1, &n);
     energy_sample_t *a9 = make_panel(1, &n);
-    for (size_t i = 0; i < n; i++) {
-        a0[i].load = 0.3; a0[i].activity = 0.0;
-        a9[i].load = 0.3; a9[i].activity = 0.9;
-    }
     energy_output_t o0, o9;
-    CHECK(energy_compute(a0, n, &cfg, &o0) == ENERGY_OK);
-    CHECK(energy_compute(a9, n, &cfg, &o9) == ENERGY_OK);
+    CHECK(energy_compute_fixed(a0, n, &cfg, fl_3, fa_0, &o0) == ENERGY_OK);
+    CHECK(energy_compute_fixed(a9, n, &cfg, fl_3, fa_9, &o9) == ENERGY_OK);
     CHECK_NEAR(o0.points[100].activity, 0.0, 1e-12);
     CHECK_NEAR(o9.points[100].activity, 0.9, 1e-12);
     double maxdiff = 0.0;
@@ -746,6 +727,7 @@ static void test_batch_honors_provided_load(void)
     energy_output_free(&o0);
     energy_output_free(&o9);
     free(low); free(high); free(auto_panel); free(a0); free(a9);
+    free(fl_lo); free(fl_hi); free(fa_0); free(fa_9); free(fl_3);
 }
 
 static void test_hrv_conversion(void)
@@ -821,8 +803,6 @@ static void test_config_validation(void)
     s0.tod = 12.0;
     s0.q_hr = 1.0;
     s0.q_hrv = 1.0;
-    s0.load = 0.0;
-    s0.activity = 0.0;
     energy_point_t pt;
     CHECK(energy_ctx_step(&ctx, &s0, &pt) == ENERGY_EINVAL);
 
@@ -910,8 +890,6 @@ static void test_degenerate_inputs(void)
         two[i].hrv_log = 3.5;
         two[i].q_hr = 1.0;
         two[i].q_hrv = 1.0;
-        two[i].load = -1.0;
-        two[i].activity = -1.0;
     }
     CHECK(energy_compute(two, 2, NULL, &out) == ENERGY_OK);
     CHECK(out.n_points == 2);
@@ -937,7 +915,6 @@ static void test_nan_fuzz(void)
             if (r % 31 == 0) s[i].q_hr = NAN;
             if (r % 37 == 0) s[i].tod = NAN;
             if (r % 41 == 0) s[i].stage[ENERGY_LIGHT] = NAN;
-            if (r % 43 == 0) s[i].load = -1.0;
             if (r % 47 == 0) s[i].hr = 400.0;
         }
         energy_config_t cfg;

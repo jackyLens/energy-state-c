@@ -4,6 +4,7 @@
  * 运行：make test
  */
 #include "vitality.h"
+#include "../src/energy_internal.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -311,16 +312,18 @@ static void test_stream_equals_batch(void)
 
     vitality_ctx_t ctx;
     vitality_ctx_init(&ctx, NULL, NULL);
+    energy_ctx_t ectx;
+    energy_ctx_init(&ectx, NULL);
     double max_dv = 0.0, max_dd = 0.0;
     for (size_t i = 0; i < n; i++) {
         vitality_point_t vp;
         energy_point_t ep;
-        /* 与能量层测试同口径：把批量算出的 load/activity 喂给流式（批量负荷用全窗口标定，
-         * 流式用在线标定，二者本就允许不同），这样比较的才是精力层本身 */
-        energy_sample_t one = s[i];
-        one.load = out.energy.points[i].load;
-        one.activity = out.energy.points[i].activity;
-        CHECK(vitality_ctx_step(&ctx, &one, &ep, &vp) == ENERGY_OK);
+        /* 与能量层测试同口径：能量层用批量算出的 load/activity（内部测试入口）推进，再用
+         * vitality_ctx_feed 喂给精力层（批量负荷用全窗口标定，流式用在线标定，二者本就允许
+         * 不同），这样比较的才是精力层本身 */
+        CHECK(energy_ctx_step_fixed(&ectx, &s[i], out.energy.points[i].load,
+                                    out.energy.points[i].activity, &ep) == ENERGY_OK);
+        CHECK(vitality_ctx_feed(&ctx, &s[i], &ep, &vp) == ENERGY_OK);
         CHECK_NEAR(ep.e, out.energy.points[i].e, 1e-12);
         /* 状态量（v/d/v_star）逐点一致；vitality 只差在批量的 15 min 平滑 */
         if (fabs(vp.v - out.points[i].v) > max_dv) max_dv = fabs(vp.v - out.points[i].v);
@@ -848,13 +851,15 @@ static void test_spo2(void)
         CHECK(smp != NULL);
         vitality_ctx_t ctx;
         vitality_ctx_init(&ctx, NULL, NULL);
+        energy_ctx_t ectx;
+        energy_ctx_init(&ectx, NULL);
         double max_dd = 0.0;
         for (size_t i = 0; i < n; i++) {
             vitality_point_t vp;
-            energy_sample_t one = smp[i]; /* 同 test_stream_equals_batch：负荷/活动量用批量标定值 */
-            one.load = bad.energy.points[i].load;
-            one.activity = bad.energy.points[i].activity;
-            CHECK(vitality_ctx_step(&ctx, &one, NULL, &vp) == ENERGY_OK);
+            energy_point_t ep; /* 同 test_stream_equals_batch：负荷/活动量用批量标定值 */
+            CHECK(energy_ctx_step_fixed(&ectx, &smp[i], bad.energy.points[i].load,
+                                        bad.energy.points[i].activity, &ep) == ENERGY_OK);
+            CHECK(vitality_ctx_feed(&ctx, &smp[i], &ep, &vp) == ENERGY_OK);
             const double dd = fabs(vp.d - bad.points[i].d);
             if (dd > max_dd) max_dd = dd;
             CHECK((vp.flags & (VITALITY_FLAG_SPO2 | VITALITY_FLAG_BREATH)) ==

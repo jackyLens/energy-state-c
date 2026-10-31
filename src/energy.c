@@ -1,18 +1,17 @@
 /*
- * energy.c -- energy state model (ODE + EKF), C implementation.
+ * energy.c —— 能量状态引擎（ODE + EKF）的实现，evobeing 公式，作者 zhenghuimin
  *
- * Mapping to the Python reference `energy/src/energy_state/` (bit-level parity held up to
- * v1.1.1; the v1.2 additions -- personal observation baselines, gap policy, online load
- * calibration, soft gating -- exist only in C for now):
- *   params.py      -> energy_params_t + energy_phi
- *   ode.py         -> energy_advance / 2x2 Jacobians / analytic discretisation
- *   load.py        -> load_raw_series / energy_load_raw
- *   observation.py -> energy_obs_t + obs_regress (+ personal intercepts, v1.2)
- *   ekf.py         -> ekf_predict_step / ctx_update (robust t, gating, Joseph form)
- *   product.py     -> energy_display / smoothing / daily summary
+ * 结构：
+ *   参数与默认值        energy_params_t / energy_config_default
+ *   状态方程            energy_advance、2×2 雅可比、解析离散化
+ *   负荷与活动量        load_raw_series / energy_load_raw / energy_activity_step
+ *   观测方程            energy_obs_t + obs_regress（截距为个体基线）
+ *   EKF                 ekf_predict_step / ctx_update（Student-t 稳健化、门控、Joseph 形式）
+ *   展示与每日汇总      energy_display / 平滑 / daily
  */
 
 #include "energy.h"
+#include "energy_internal.h"
 
 #include <limits.h>
 #include <math.h>
@@ -153,8 +152,6 @@ void energy_sample_init(energy_sample_t *s)
     s->hrv_log = NAN;
     s->q_hr = 1.0;
     s->q_hrv = 1.0;
-    s->load = -1.0;
-    s->activity = -1.0;
     s->spo2 = NAN;
     s->spo2_min = NAN;
 }
@@ -488,7 +485,7 @@ double energy_sleep_equilibrium(const energy_params_t *p, double s, double psi)
 }
 
 /*
- * 单步解析推进（与 Python advance_raw 逐行对应）。
+ * 单步解析推进。
  * 输入：m 睡眠概率、lam 分期消散、psi 分期恢复能力、load、stress、h（小时）。
  */
 static void advance_raw(const energy_params_t *p,
@@ -554,7 +551,7 @@ static void continuous_jacobian(const energy_params_t *p,
     F[3] = -(alpha + beta);
 }
 
-/* Φ = expm(F·h)，2×2 闭式（与 Python discrete_jacobian 一致） */
+/* Φ = expm(F·h)，2×2 闭式 */
 static void discrete_jacobian(const double F[4], double h, double Phi[4])
 {
     const double A00 = F[0] * h, A01 = F[1] * h, A10 = F[2] * h, A11 = F[3] * h;
@@ -609,7 +606,7 @@ double energy_load_raw(const energy_load_cfg_t *c,
     return c->w_trimp * trimp + c->w_steps * step_frac + c->w_dhr * dhr;
 }
 
-/* hr_rest / hr_max / time-of-day baseline from the raw series (as Python load.py).
+/* hr_rest / hr_max / time-of-day baseline from the raw series.
  * All of them report ENERGY_ENOMEM instead of silently falling back to constants. */
 static int estimate_hr_rest(const energy_sample_t *s, size_t n, double *out)
 {
@@ -758,7 +755,7 @@ static double circ_raw(const energy_display_cfg_t *c, double tod)
     return cos(w * (tod - c->peak_hour)) - dip;
 }
 
-/* 归一化因子：在 288 点标准网格上取 max|c|。整天覆盖时与 Python 完全一致。 */
+/* 归一化因子：在 288 点标准网格上取 max|c|。整天覆盖时结果与网格无关。 */
 static double circ_scale(const energy_display_cfg_t *c)
 {
     double mx = 1e-9;
@@ -818,7 +815,7 @@ static double sleep_part(const double stage[4])
 /* Observation model without its intercept: sum of slope x feature (E, stages / activity,
  * circadian harmonics). The intercept is the population prior coef[0] (returned in
  * *intercept) or, by default, the user's personal level. */
-static double obs_regress(const energy_config_t *cfg, const energy_sample_t *s,
+static double obs_regress(const energy_config_t *cfg, const energy_sample_t *s, double activity,
                           double e_state, int night, int channel,
                           double *slope_e, double *sigma, double *intercept)
 {
@@ -834,7 +831,7 @@ static double obs_regress(const energy_config_t *cfg, const energy_sample_t *s,
         coef = (channel == 0) ? o->hr_day : o->hrv_day;
         const double w = 2.0 * M_PI / 24.0;
         const double t = wrap24(s->tod);
-        acc = coef[1] * e_state + coef[2] * s->activity + coef[3] * cos(w * t) + coef[4] * sin(w * t) +
+        acc = coef[1] * e_state + coef[2] * activity + coef[3] * cos(w * t) + coef[4] * sin(w * t) +
               coef[5] * cos(2.0 * w * t) + coef[6] * sin(2.0 * w * t);
         *sigma = (channel == 0) ? o->sigma_hr_day : o->sigma_hrv_day;
     }
@@ -897,7 +894,7 @@ static void ctx_update(energy_ctx_t *ctx, const energy_sample_t *s, int channel)
     const int night = is_night(s->stage);
     const int k = (night ? ENERGY_BL_HR_NIGHT : ENERGY_BL_HR_DAY) + channel;
     double slope, sigma, intercept;
-    const double reg = obs_regress(cfg, s, ctx->e, night, channel, &slope, &sigma, &intercept);
+    const double reg = obs_regress(cfg, s, ctx->cur_activity, ctx->e, night, channel, &slope, &sigma, &intercept);
     if (!isfinite(reg)) return;
 
     /* Personal intercept ("your usual level"). A sample's implied level is evaluated on the
@@ -910,7 +907,7 @@ static void ctx_update(energy_ctx_t *ctx, const energy_sample_t *s, int channel)
     if (bc->enable) {
         double slope_r, sigma_r, icpt_r;
         const double implied =
-            y - obs_regress(cfg, s, ctx->ref_e, night, channel, &slope_r, &sigma_r, &icpt_r);
+            y - obs_regress(cfg, s, ctx->cur_activity, ctx->ref_e, night, channel, &slope_r, &sigma_r, &icpt_r);
         int have = 0;
         if (ctx->bl.n[k] > 0) {
             level = ctx->bl.level[k];
@@ -921,7 +918,7 @@ static void ctx_update(energy_ctx_t *ctx, const energy_sample_t *s, int channel)
             have = 1;
         }
         const int learn = (q >= 0.5) && isfinite(implied) &&
-                          (night ? sleep_part(s->stage) >= 0.5 : s->activity < bc->rest_activity);
+                          (night ? sleep_part(s->stage) >= 0.5 : ctx->cur_activity < bc->rest_activity);
         if (learn && ctx->acc_n[k] < INT_MAX) {
             /* once a level exists, clip artefacts so one spike cannot move the episode mean */
             const double lim = 6.0 * sigma;
@@ -937,7 +934,7 @@ static void ctx_update(energy_ctx_t *ctx, const energy_sample_t *s, int channel)
     ctx->resid[channel] = y - pred;
 
     if (!cfg->day_update && !night) {
-        /* Python: skip_update = (not day_update) and panel.is_day[k] */
+        /* skip_update = (not day_update) and is_day */
         if (s->tod >= 7.0 && s->tod < 22.0) return;
     }
 
@@ -992,7 +989,7 @@ static void ctx_update(energy_ctx_t *ctx, const energy_sample_t *s, int channel)
     ctx->p11 = t10 * a10 + t11 * a11 + K1 * K1 * R_use;
 }
 
-/* 开环推进：与 Python simulate 一样切成 <=2.5 分钟的子步 */
+/* 开环推进：切成 <=2.5 分钟的子步 */
 static void simulate_advance(const energy_params_t *p, double s, double e,
                              double m, double lam, double psi,
                              double load, double stress, double h,
@@ -1067,8 +1064,8 @@ void energy_ctx_gate_stats(const energy_ctx_t *ctx, unsigned long *n_obs, unsign
     if (n_gated) *n_gated = ctx ? ctx->n_gated : 0ul;
 }
 
-/* Does the caller's raw sample carry any information? Rows without HR/HRV, stages, steps or a
- * positive load/activity (e.g. a no-wear placeholder) only advance time. */
+/* Does the caller's raw sample carry any information? Rows without HR/HRV, stages or steps
+ * (e.g. a no-wear placeholder) only advance time. */
 static int sample_has_data(const energy_sample_t *s)
 {
     if (isfinite(s->hr) && isfinite(s->q_hr) && s->q_hr > 0.0) return 1;
@@ -1077,8 +1074,6 @@ static int sample_has_data(const energy_sample_t *s)
         if (isfinite(s->stage[i]) && s->stage[i] > 0.0) return 1;
     }
     if (isfinite(s->steps) && s->steps > 0.0) return 1;
-    if (isfinite(s->load) && s->load > 0.0) return 1;
-    if (isfinite(s->activity) && s->activity > 0.0) return 1;
     return 0;
 }
 
@@ -1199,11 +1194,8 @@ static void lc_observe(energy_ctx_t *ctx, const energy_sample_t *s, double raw, 
     }
 }
 
-static double sample_activity(const energy_config_t *cfg, const energy_sample_t *s)
-{
-    if (isfinite(s->activity) && s->activity >= 0.0) return clampd(s->activity, 0.0, 1.0);
-    return energy_activity_step(s->steps, s->kcal, cfg->load.steps_ref);
-}
+/* fixed (test-only) value wins when it is a finite number >= 0, otherwise the library computes */
+static int fixed_given(double v) { return isfinite(v) && v >= 0.0; }
 
 /* ---- personal baseline episodes ----------------------------------------------------------- */
 
@@ -1469,7 +1461,7 @@ static void sanitize_sample(energy_sample_t *s)
 /* Shared by energy_ctx_step and energy_compute. has_data is decided on the caller's raw
  * sample (batch interpolation must not turn a no-wear row into data). */
 static int ctx_step_internal(energy_ctx_t *ctx, const energy_sample_t *s_in, energy_point_t *out,
-                             int has_data)
+                             int has_data, double fix_load, double fix_act)
 {
     if (ctx->config_error) return ENERGY_EINVAL;
     energy_sample_t local = *s_in;
@@ -1500,12 +1492,13 @@ static int ctx_step_internal(energy_ctx_t *ctx, const energy_sample_t *s_in, ene
          * so the first sample after a 3 h gap saturated L) */
         const double dt = clampd(h, 0.0, ENERGY_TRIMP_MAX_DT_H);
         const double raw = sample_load_raw(ctx, &local, dt);
-        load = (isfinite(local.load) && local.load >= 0.0) ? clampd(local.load, 0.0, 1.0)
-                                                           : clampd(raw / lc_l_ref(ctx), 0.0, 1.0);
-        activity = sample_activity(&ctx->cfg, &local);
+        load = fixed_given(fix_load) ? clampd(fix_load, 0.0, 1.0)
+                                     : clampd(raw / lc_l_ref(ctx), 0.0, 1.0);
+        activity = fixed_given(fix_act)
+                       ? clampd(fix_act, 0.0, 1.0)
+                       : energy_activity_step(local.steps, local.kcal, ctx->cfg.load.steps_ref);
         lc_observe(ctx, &local, raw, h_since_data);
-        local.load = load;
-        local.activity = activity;
+        ctx->cur_activity = activity;
 
         ctx->prev_load = load;
         ctx->prev_stress = local.stress;
@@ -1526,7 +1519,8 @@ static int ctx_step_internal(energy_ctx_t *ctx, const energy_sample_t *s_in, ene
     return ENERGY_OK;
 }
 
-int energy_ctx_step(energy_ctx_t *ctx, const energy_sample_t *sample, energy_point_t *out)
+int energy_ctx_step_fixed(energy_ctx_t *ctx, const energy_sample_t *sample,
+                          double load, double activity, energy_point_t *out)
 {
     if (!ctx || !sample) return ENERGY_EINVAL;
     if (ctx->config_error) return ENERGY_EINVAL;
@@ -1538,9 +1532,15 @@ int energy_ctx_step(energy_ctx_t *ctx, const energy_sample_t *sample, energy_poi
         div = 100.0; /* the stream turned out to be 0-100: switch for good */
     }
     if (isfinite(local.stress)) local.stress /= div;
-    const int rc = ctx_step_internal(ctx, &local, out, sample_has_data(sample));
+    const int has_data = sample_has_data(sample) || fixed_given(load) || fixed_given(activity);
+    const int rc = ctx_step_internal(ctx, &local, out, has_data, load, activity);
     if (rc == ENERGY_OK && !(ctx->cfg.stress_scale > 0.0)) ctx->stress_div = div;
     return rc;
+}
+
+int energy_ctx_step(energy_ctx_t *ctx, const energy_sample_t *sample, energy_point_t *out)
+{
+    return energy_ctx_step_fixed(ctx, sample, -1.0, -1.0, out);
 }
 
 void energy_ctx_peek(const energy_ctx_t *ctx, double tod, energy_point_t *out)
@@ -1576,7 +1576,7 @@ void energy_output_free(energy_output_t *out)
     out->n_daily = 0;
 }
 
-/* Raw load series + calibration (as Python load.py). Every allocation failure is reported as
+/* Raw load series + calibration. Every allocation failure is reported as
  * ENERGY_ENOMEM. prof_out (ENERGY_BINS values) may be NULL. */
 static int load_raw_series(const energy_sample_t *samples, size_t n,
                            const energy_load_cfg_t *cfg, double *raw,
@@ -1620,6 +1620,7 @@ static int load_raw_series(const energy_sample_t *samples, size_t n,
 
 static int compute_loads(const energy_sample_t *samples, size_t n,
                          const energy_load_cfg_t *cfg,
+                         const double *fix_load, const double *fix_act,
                          double *load, double *activity)
 {
     double *raw = (double *)malloc(n * sizeof(double));
@@ -1631,13 +1632,12 @@ static int compute_loads(const energy_sample_t *samples, size_t n,
         return rc;
     }
     for (size_t i = 0; i < n; i++) {
-        /* caller-provided values (>= 0) win, otherwise the library's normalised load */
-        const double given_load = samples[i].load;
-        load[i] = (isfinite(given_load) && given_load >= 0.0)
-                      ? clampd(given_load, 0.0, 1.0)
-                      : clampd(raw[i] / l_ref, 0.0, 1.0);
-        const double given_act = samples[i].activity;
-        activity[i] = (isfinite(given_act) && given_act >= 0.0)
+        /* fixed (test-only) values win, otherwise the library's normalised load */
+        const double given_load = fix_load ? fix_load[i] : -1.0;
+        load[i] = fixed_given(given_load) ? clampd(given_load, 0.0, 1.0)
+                                          : clampd(raw[i] / l_ref, 0.0, 1.0);
+        const double given_act = fix_act ? fix_act[i] : -1.0;
+        activity[i] = fixed_given(given_act)
                           ? clampd(given_act, 0.0, 1.0)
                           : energy_activity_step(samples[i].steps, samples[i].kcal, cfg->steps_ref);
     }
@@ -1787,8 +1787,10 @@ static void daily_summary(const energy_config_t *cfg, const energy_point_t *poin
     d->sleep_debt = debt;
 }
 
-int energy_compute(const energy_sample_t *samples, size_t n,
-                   const energy_config_t *cfg_in, energy_output_t *out)
+int energy_compute_fixed(const energy_sample_t *samples, size_t n,
+                         const energy_config_t *cfg_in,
+                         const double *fix_load, const double *fix_act,
+                         energy_output_t *out)
 {
     if (!samples || n < 2 || n > ENERGY_MAX_SAMPLES || !out) return ENERGY_EINVAL;
     memset(out, 0, sizeof(*out));
@@ -1837,7 +1839,7 @@ int energy_compute(const energy_sample_t *samples, size_t n,
         }
         for (size_t i = 0; i < n; i++) work[i].stress /= div; /* NaN stays NaN */
     }
-    /* linear gap filling of stress / steps / kcal (as the Python API) */
+    /* linear gap filling of stress / steps / kcal */
     for (int f = 0; f < 3; f++) {
         for (size_t i = 0; i < n; i++) scratch[i] = *interp_field(&work[i], f);
         fill_linear(scratch, n);
@@ -1846,17 +1848,17 @@ int energy_compute(const energy_sample_t *samples, size_t n,
     /* tod back-fill, stage normalisation, q clamping (before the load calibration) */
     for (size_t i = 0; i < n; i++) sanitize_sample(&work[i]);
 
-    rc = compute_loads(work, n, &cfg.load, load, activity);
+    rc = compute_loads(work, n, &cfg.load, fix_load, fix_act, load, activity);
     if (rc != ENERGY_OK) goto cleanup;
 
     energy_ctx_t ctx;
     energy_ctx_init(&ctx, &cfg);
     for (size_t i = 0; i < n; i++) {
-        energy_sample_t s = work[i];
-        s.load = load[i];
-        s.activity = activity[i];
         /* data / no-data is judged on the caller's row, not on the interpolated copy */
-        rc = ctx_step_internal(&ctx, &s, &points[i], sample_has_data(&samples[i]));
+        const int has_data = sample_has_data(&samples[i]) ||
+                             (fix_load && fixed_given(fix_load[i])) ||
+                             (fix_act && fixed_given(fix_act[i]));
+        rc = ctx_step_internal(&ctx, &work[i], &points[i], has_data, load[i], activity[i]);
         if (rc != ENERGY_OK) goto cleanup;
     }
     baseline_flush(&ctx); /* commit the last (open) night / day */
@@ -1912,4 +1914,10 @@ cleanup:
     free(points);
     free(daily);
     return rc;
+}
+
+int energy_compute(const energy_sample_t *samples, size_t n,
+                   const energy_config_t *cfg, energy_output_t *out)
+{
+    return energy_compute_fixed(samples, n, cfg, NULL, NULL, out);
 }

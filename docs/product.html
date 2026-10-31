@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>energy-state-c 产品说明 · 今天还剩多少余量</title>
+<title>evobeing 产品说明 · 今天还剩多少余量</title>
 <style>
   :root{
     --paper:#faf7f2; --paper-2:#f2ece1; --ink:#23252f; --muted:#5b6070; --soft:#71768a;
@@ -125,7 +125,7 @@
 <div class="wrap">
 
   <header>
-    <div class="eyebrow">energy-state-c · product note</div>
+    <div class="eyebrow">evobeing · zhenghuimin · 能量 · 产品说明</div>
     <h1>今天，还剩多少余量</h1>
     <p class="lede">它不测电量，而是根据睡眠、活动、压力和你的个人基线，推算一条 0–100 的能量曲线。曲线回答一个问题：以今天的恢复和消耗，现在大概还剩多少余量。</p>
     <div class="meta">
@@ -355,11 +355,11 @@
         <p style="margin-top:8px"><code>energy_ctx_step()</code></p>
       </div>
       <div class="card"><h4><span class="dot" style="background:#2c7a4b"></span>离线分析</h4>
-        <p>用 Python 端拟合参数与观测模型，导出 <code>fit.json</code>，C 端只做推理。</p>
+        <p>参数与观测模型可离线拟合后导入，C 端只做推理。</p>
         <p style="margin-top:8px"><code>cfg.obs / cfg.params</code></p>
       </div>
     </div>
-    <div class="note warn"><b>不建议</b>把同一用户的曲线一半来自 C、一半来自 Python：两边的负荷归一化与平滑窗口不同，曲线会不可比。选定一条链路，保持参数一致。</div>
+    <div class="note warn"><b>同一用户的曲线应来自同一条链路、同一组参数</b>，否则前后不可比。</div>
   </section>
 
   <section id="scale">
@@ -461,7 +461,7 @@
   </section>
 
   <footer>
-    <span>energy-state-c v1.2.0 · 产品说明</span>
+    <span>evobeing v2.0.0 · zhenghuimin · 产品说明</span>
     <span>曲线为模型估计，不构成医疗建议</span>
   </footer>
 </div>

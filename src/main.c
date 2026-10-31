@@ -5,8 +5,8 @@
  *   energy_cli panel.csv [--out out.csv] [--no-ekf] [--no-smooth] [--json]
  *
  * 输入 CSV（第一行是表头，列顺序无关）：
- *   t_h,tod,wake,light,deep,rem,hr,hrv_log,steps,kcal,stress,q_hr,q_hrv[,load,activity,spo2,spo2_min]
- *   缺失值写 nan 或留空；load/activity 留空表示由库内部计算。
+ *   t_h,tod,wake,light,deep,rem,hr,hrv_log,steps,kcal,stress,q_hr,q_hrv,spo2,spo2_min
+ *   缺失值写 nan 或留空。
  *
  * 输出 CSV：t_h,tod,s,e,e_sd,energy,lower,upper,base,load,activity
  */
@@ -108,8 +108,6 @@ static int load_panel(const char *path, energy_sample_t **out, size_t *n_out)
     const int istress = find_col(&h, "stress");
     const int iqhr = find_col(&h, "q_hr");
     const int iqhrv = find_col(&h, "q_hrv");
-    const int iload = find_col(&h, "load");
-    const int iact = find_col(&h, "activity");
     const int ispo2 = find_col(&h, "spo2");
     const int ispo2min = find_col(&h, "spo2_min");
 
@@ -148,8 +146,6 @@ static int load_panel(const char *path, energy_sample_t **out, size_t *n_out)
         s->stress = (istress >= 0 && istress < nf) ? to_double(fields[istress], 0.0) : 0.0;
         s->q_hr = (iqhr >= 0 && iqhr < nf) ? to_double(fields[iqhr], 1.0) : 1.0;
         s->q_hrv = (iqhrv >= 0 && iqhrv < nf) ? to_double(fields[iqhrv], 1.0) : 1.0;
-        s->load = (iload >= 0 && iload < nf) ? to_double(fields[iload], -1.0) : -1.0;
-        s->activity = (iact >= 0 && iact < nf) ? to_double(fields[iact], -1.0) : -1.0;
         s->spo2 = (ispo2 >= 0 && ispo2 < nf) ? to_double(fields[ispo2], NAN) : NAN;
         s->spo2_min = (ispo2min >= 0 && ispo2min < nf) ? to_double(fields[ispo2min], NAN) : NAN;
     }

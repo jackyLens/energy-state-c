@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>energy-state-c 技术说明 · 精力层</title>
+<title>evobeing 技术说明 · 精力</title>
 <style>
   :root{
     --paper:#faf7f2; --paper-2:#f2ece1; --ink:#23252f; --muted:#5b6070; --soft:#71768a;
@@ -143,7 +143,7 @@
 <body>
 <div class="wrap">
   <header>
-    <div class="eyebrow">energy-state-c · technical note · vitality v1.1.0</div>
+    <div class="eyebrow">evobeing · zhenghuimin · 精力 · 技术说明 v2.0.0</div>
     <h1>在能量之上，再算一条精力</h1>
     <p class="lede">能量回答“储备还剩多少”，精力回答“此刻用得出来多少”。精力层把能量层解释不了的心率 / HRV 残差、运动与小睡的回弹、睡眠质量与夜间血氧平稳度相对本人常态的偏差，建模成一个会自己消退的偏离量 D，叠加在“能量 × 昼夜节律”的均衡线上。</p>
     <div class="meta"><span class="chip"><b>C99</b> + libm</span><span class="chip">级联于 energy.c</span><span class="chip"><b>1</b> 个标量隐状态</span><span class="chip">批量 <b>+</b> 流式</span></div>
@@ -155,8 +155,8 @@
     <div class="cover-grid">
       <div class="cover-cell"><div class="n" style="color:#0e7a83">1</div><div class="l">个新增隐状态 D</div></div>
       <div class="cover-cell"><div class="n" style="color:#bf4520">0</div><div class="l">处能量层改动（只加两列输出）</div></div>
-      <div class="cover-cell"><div class="n" style="color:#2c7a4b">37,897</div><div class="l">精力层测试断言</div></div>
-      <div class="cover-cell"><div class="n" style="color:#a8650f">4.06 µs</div><div class="l">每步增量开销</div></div>
+      <div class="cover-cell"><div class="n" style="color:#2c7a4b">40,489</div><div class="l">精力层测试断言</div></div>
+      <div class="cover-cell"><div class="n" style="color:#a8650f">6736 B</div><div class="l">能量 + 精力上下文内存</div></div>
     </div>
   </div>
 
@@ -197,7 +197,7 @@ dD/dt = − D / τ_D(E) + Σ 事件脉冲 + 观测修正          <span class="c
 <text x="42" y="93" font-size="11.5" fill="#5b6070">步数 / 分期</text>
 <text x="42" y="108" font-size="11.5" fill="#5b6070">质量 / 压力</text>
 <rect x="220" y="20" width="300" height="290" rx="8" fill="none" stroke="#bf4520" stroke-dasharray="4,3"/>
-<text x="232" y="40" font-size="11" fill="#bf4520" letter-spacing=".12em">能量层 energy.c v1.2.0（不改）</text>
+<text x="232" y="40" font-size="11" fill="#bf4520" letter-spacing=".12em">能量层 energy.c（不改）</text>
 <rect x="240" y="56" width="260" height="60" rx="6" fill="#fdeee8" stroke="#bf4520"/>
 <text x="252" y="76" font-size="13" font-weight="600" fill="#23252f">状态方程 S / E</text>
 <text x="252" y="94" font-size="11.5" fill="#5b6070">解析解推进，睡眠恢复、日间消耗</text>
@@ -205,15 +205,15 @@ dD/dt = − D / τ_D(E) + Σ 事件脉冲 + 观测修正          <span class="c
 <text x="252" y="152" font-size="13" font-weight="600" fill="#23252f">个体化观测模型 + EKF</text>
 <text x="252" y="170" font-size="11.5" fill="#5b6070">预测 HR / HRV，用残差校正 E</text>
 <rect x="240" y="208" width="120" height="84" rx="6" fill="#fbe9ef" stroke="#a83f63"/>
-<text x="252" y="228" font-size="13" font-weight="600" fill="#23252f">输出 (v1.2 新增)</text>
+<text x="252" y="228" font-size="13" font-weight="600" fill="#23252f">输出（残差）</text>
 <text x="252" y="246" font-size="11.5" fill="#5b6070">hr_resid</text>
 <text x="252" y="261" font-size="11.5" fill="#5b6070">hrv_resid</text>
 <rect x="380" y="208" width="120" height="84" rx="6" fill="#fdeee8" stroke="#bf4520"/>
 <text x="392" y="228" font-size="13" font-weight="600" fill="#23252f">输出</text>
 <text x="392" y="246" font-size="11.5" fill="#5b6070">E, sleep_prob</text>
-<text x="392" y="261" font-size="11.5" fill="#5b6070">load, activity</text>
+<text x="392" y="261" font-size="11.5" fill="#5b6070">load, activity（内部计算）</text>
 <rect x="560" y="20" width="330" height="290" rx="8" fill="none" stroke="#0e7a83" stroke-dasharray="4,3"/>
-<text x="572" y="40" font-size="11" fill="#0e7a83" letter-spacing=".12em">精力层 vitality.c v1.1.0</text>
+<text x="572" y="40" font-size="11" fill="#0e7a83" letter-spacing=".12em">精力层 vitality.c</text>
 <rect x="580" y="56" width="290" height="52" rx="6" fill="#e6f4f5" stroke="#0e7a83"/>
 <text x="592" y="76" font-size="13" font-weight="600" fill="#23252f">① 预测  D ← e^(−h/τ_D)·D</text>
 <text x="592" y="94" font-size="11.5" fill="#5b6070">τ_D = 0.75 h·(1+1.5(1−E))</text>
@@ -403,7 +403,7 @@ L &gt; 0.60 且 A ≥ 0.10 → w_act = 0（在运动，不用）      L &gt; 0.6
     <pre>x1 = clip( (ΔE − ΔE̅) / 0.30, ±0.5 )                          <span class="c">今晚能量回充量 vs 本人常态</span>
 x2 = clip( (HRV_wake − HRV̅_wake) / 0.44, ±0.5 )               <span class="c">醒前 1 h 的 HRV vs 本人夜间常态</span>
 x3 = clip( 0.5·q_时长 + 0.25·q_深睡 − 0.25·q_碎片, ±0.5 )       <span class="c">时长差 2 h / 深睡与碎片化差 10 个百分点记满分</span>
-x4 = clip( 0.5·q_血氧均值 − 0.5·q_瞬时下跌, ±0.5 )              <span class="c">v1.1：夜间血氧平稳度（§7）；没有血氧时为 0</span>
+x4 = clip( 0.5·q_血氧均值 − 0.5·q_瞬时下跌, ±0.5 )              <span class="c">夜间血氧平稳度（§7）；没有血氧时为 0</span>
 D_init = 0.40 · clip( 0.4·x1 + 0.3·x2 + 0.3·x3 + 0.2·x4, ±0.5 )  <span class="c">|D_init| ≤ 0.2；没有常态的项记 0</span></pre>
     <table>
       <thead><tr><th>规则</th><th>说明</th></tr></thead>
@@ -446,7 +446,7 @@ x4 = clip( 0.5·q_均值 − 0.5·q_下跌, ±0.5 )     x4 ≤ −0.25 时晨起
         <tr><td>只看夜间</td><td>日间样本的 spo2 字段被完全忽略；不做任何日间观测更新</td></tr>
         <tr><td>只跟自己比</td><td>均值与下跌占比都减去本人常态（前 3 个有血氧的夜累计平均，之后 EWMA λ = 0.2）；高原常住者的常态就是 92%，不会被当成"差"</td></tr>
         <tr><td>不猜原因</td><td>库只说"昨夜血氧比你平时不稳"，不区分饮酒 / 鼻塞 / 海拔 / 任何健康状况，也不设任何绝对阈值（如 90%）</td></tr>
-        <tr><td>可退化</td><td>样本不传血氧（NAN / 0）、或 w_spo2 = 0 时，所有输出与 v1.0 逐位一致（<code>test_spo2</code>）；旧画像 <code>vitality_habit_t</code>（memset 0）可直接恢复</td></tr>
+        <tr><td>可退化</td><td>样本不传血氧（NAN / 0）、或 w_spo2 = 0 时，所有输出与不带血氧时逐位一致（<code>test_spo2</code>）；旧画像 <code>vitality_habit_t</code>（memset 0）可直接恢复</td></tr>
         <tr><td>续睡合并</td><td>夜醒后 2 h 内续睡，血氧直方图随分期统计一起保留，按整夜重算</td></tr>
       </tbody>
     </table>
@@ -491,7 +491,7 @@ x4 = clip( 0.5·q_均值 − 0.5·q_下跌, ±0.5 )     x4 ≤ −0.25 时晨起
     <pre><span class="c">/* 流式：内部自带 energy_ctx_t */</span>
 vitality_ctx_t vc;
 vitality_ctx_init(&amp;vc, &amp;ecfg, &amp;vcfg);                 <span class="c">/* 配置可为 NULL */</span>
-vitality_ctx_set_habit(&amp;vc, &amp;saved_habit);            <span class="c">/* 可选：恢复个人常态 */</span>
+vitality_ctx_set_habit(&amp;vc, &amp;saved_habit);            <span class="c">/* 恢复个人常态；首次使用可不调用 */</span>
 for (each 5-min sample) {
     energy_point_t ep; vitality_point_t vp;
     vitality_ctx_step(&amp;vc, &amp;sample, &amp;ep, &amp;vp);       <span class="c">/* ep.energy, vp.score, vp.quadrant, vp.flags */</span>
@@ -520,7 +520,7 @@ vitality_output_free(&amp;out);
         <tr><td><code>SPO2</code> / <code>BREATH</code></td><td>晨起点：本夜血氧覆盖充分、已参与初始化（<code>spo2_night / spo2_dip</code> 字段有效）/ 昨夜血氧平稳度明显低于本人常态</td></tr>
       </tbody>
     </table>
-    <p class="small">样本新增两个可选字段：<code class="inl">spo2</code>（窗口均值 %）与 <code class="inl">spo2_min</code>（窗口最低值 %），缺失填 NAN；能量层不读它们。CSV 对应列名 <code class="inl">spo2, spo2_min</code>。</p>
+    <p class="small">样本中的 <code class="inl">spo2</code>（窗口均值 %）与 <code class="inl">spo2_min</code>（窗口最低值 %）只在夜间参与计算，没有读数时填 NAN；能量层不读它们。CSV 对应列名 <code class="inl">spo2, spo2_min</code>。</p>
     <p class="small">非法配置：<code class="inl">vitality_config_validate</code> 逐项范围检查，<code class="inl">vitality_compute</code> 返回 <code class="inl">ENERGY_EINVAL</code>，流式上下文每步返回错误；时间倒退返回 <code class="inl">ENERGY_EDOMAIN</code>；NaN 输入按缺失处理（<code class="inl">test_nan_fuzz</code>）。</p>
 
   </section>
@@ -530,19 +530,15 @@ vitality_output_free(&amp;out);
     <div class="rule"></div>
 
     <div class="stats">
-      <div class="stat g"><div class="n">37,897</div><div class="l">精力层测试断言（能量层另有 81,794）</div></div>
-      <div class="stat t"><div class="n">93.7%</div><div class="l">vitality.c 行覆盖（gcov，766 行）</div></div>
-      <div class="stat i"><div class="n">4.06 µs</div><div class="l">精力层每步增量（桌面 x86-64，-O2）</div></div>
-      <div class="stat a"><div class="n">3976 B</div><div class="l">vitality_ctx_t（含 energy_ctx_t 2344 B）</div></div>
+      <div class="stat g"><div class="n">40,489</div><div class="l">精力层测试断言（能量层另有 81,794）</div></div>
+      <div class="stat t"><div class="n">12,121</div><div class="l">主接口层测试断言（evobeing_zhenghuimin）</div></div>
+      <div class="stat i"><div class="n">6736 B</div><div class="l">evobeing_ctx_t（能量 + 精力上下文）</div></div>
+      <div class="stat a"><div class="n">3984 B</div><div class="l">vitality_ctx_t（含 energy_ctx_t 2352 B）</div></div>
     </div>
     <table>
       <thead><tr><th>命令</th><th>结果</th></tr></thead>
       <tbody>
-        <tr><td><code>make test</code></td><td>能量 OK: 81,794 checks, 0 failures；精力 OK: 37,897 checks, 0 failures</td></tr>
-        <tr><td><code>make sanitize</code>（ASan + UBSan）</td><td>两套测试均通过</td></tr>
-        <tr><td><code>make coverage</code></td><td>vitality.c 93.7%，energy.c 97.0%</td></tr>
-        <tr><td><code>make bench</code>（21 天 6048 点）</td><td>能量流式 4.56 µs/步，能量 + 精力 8.62 µs/步</td></tr>
-        <tr><td><code>make check</code>（Python 对照）</td><td>本环境缺少 Python 参考实现，未运行；精力层目前没有 Python 参考</td></tr>
+        <tr><td><code>make test</code></td><td>能量 OK: 81,794 checks, 0 failures；精力 OK: 40,489 checks, 0 failures；主接口 OK: 12,121 checks, 0 failures</td></tr>
       </tbody>
     </table>
     <p class="small">测试覆盖：默认参数与非法参数；子函数（τ、均衡线、倒 U、裁剪、象限）；有界与睡眠中无观测；流式 == 批量；事件位置 / 方向 / 幅度与日汇总；用户标记与上限；晨起初始化（短睡为负、首晚为 0、学习期退出、常态持久化）；续睡合并；三种 score_mode；体质不变性；开环单调；NaN 与 3 h 缺口；能量层残差暴露；夜间血氧（恒定血氧与无血氧逐位一致、坏夜 D_init −0.04 且只打一次 BREATH、覆盖 30% 的夜被忽略、仅 spo2_min 下跌同样生效、非法值视为缺失、流式 == 批量、画像往返、w_spo2 = 0 退化）。</p>
@@ -556,7 +552,7 @@ vitality_output_free(&amp;out);
 
     <div class="cols">
       <div class="card"><h4><span class="dot" style="background:#a83f63"></span>没做的</h4>
-        <ul><li>识别咖啡 / 冥想 / 压力事件的原因（只接受用户标记）</li><li>跨用户的任何统计或排名</li><li>离线参数拟合（与能量层一样放在 Python 端）</li><li>医学用途</li></ul>
+        <ul><li>识别咖啡 / 冥想 / 压力事件的原因（只接受用户标记）</li><li>跨用户的任何统计或排名</li><li>离线参数拟合（不在设备端做）</li><li>医学用途</li></ul>
       </div>
       <div class="card"><h4><span class="dot" style="background:#a8650f"></span>需要真实数据决定的</h4>
         <ul><li>短睡场景下 D_init 的 ΔE 项是否该换成"醒时 E 相对常态"</li><li>清醒后首小时的残差是否要降权（能量层"心率随 E"假设的伴随现象）</li><li>倒 U 零点 z_c 与各事件幅度</li><li>分位窗口 28 天是否合适（轮班 / 出差）</li><li>血氧项权重 0.2 与下跌判据 3 个百分点（取决于设备的 5 min 聚合方式；给得出 spo2_min 时更灵敏）</li></ul>
@@ -566,7 +562,7 @@ vitality_output_free(&amp;out);
   </section>
 
   <footer>
-    <span>energy-state-c · vitality v1.1.0 / energy v1.2.0 · C99 · 无第三方依赖</span>
+    <span>evobeing v2.0.0 · C99 · 无第三方依赖</span>
     <span>技术说明 · 图表基于真实实现与实测（合成）数据</span>
   </footer>
 </div>

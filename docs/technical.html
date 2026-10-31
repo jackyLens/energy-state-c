@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>energy-state-c 技术说明 · 从五路信号到一条能量曲线</title>
+<title>evobeing 技术说明 · 从五路信号到一条能量曲线</title>
 <style>
   :root{
     --paper:#faf7f2; --paper-2:#f2ece1; --ink:#23252f; --muted:#5b6070; --soft:#71768a;
@@ -144,7 +144,7 @@
 <div class="wrap">
 
   <header>
-    <div class="eyebrow">energy-state-c · technical note · v1.2.0</div>
+    <div class="eyebrow">evobeing · zhenghuimin · 能量 · 技术说明 v2.0.0</div>
     <h1>从五路信号到一条能量曲线</h1>
     <p class="lede">这个 C 库把智能戒指的心率、HRV、睡眠分期、步数与压力，变成一条 5 分钟粒度、0–100 的能量曲线，附带每日汇总与睡眠恢复报告。本文说明它的数据流、模型、接口与验证边界。</p>
     <div class="meta">
@@ -162,7 +162,7 @@
       <div class="cover-cell"><div class="n" style="color:#3f5bd9">7</div><div class="l">个处理阶段</div></div>
       <div class="cover-cell"><div class="n" style="color:#bf4520">2</div><div class="l">个隐状态 S / E</div></div>
       <div class="cover-cell"><div class="n" style="color:#2c7a4b">81,794</div><div class="l">单元测试断言</div></div>
-      <div class="cover-cell"><div class="n" style="color:#a8650f">9.9e-14</div><div class="l">与 Python 的最大偏差（v1.1 对照路径）</div></div>
+      <div class="cover-cell"><div class="n" style="color:#a8650f">2</div><div class="l">个主接口函数：能量 / 精力</div></div>
     </div>
     <h3>结构</h3>
     <ol class="cover-toc">
@@ -338,21 +338,20 @@
   <section id="contract">
     <div class="sec-head"><span class="sec-no">02</span><h2>输入契约：哪些必须由外部给</h2></div>
     <div class="rule"></div>
-    <p>只有 <code class="inl">t_h</code> 是绝对必须。<code class="inl">stage</code> 与 <code class="inl">hr</code> 决定“这是不是一个能量模型”：没有分期，夜里不充电；没有心率，滤波器退化为开环。其余字段都有默认值或由库内部计算。</p>
+    <p>各字段的含义与无读数时的行为如下。没有分期，夜里不充电；没有心率，滤波器退化为开环。负荷与活动量由库内部计算，不作为输入。</p>
 
     <table>
-      <thead><tr><th style="width:110px">档位</th><th style="width:180px">字段</th><th>作用</th><th style="width:300px">不传时</th></tr></thead>
+      <thead><tr><th style="width:180px">字段</th><th>作用</th><th style="width:300px">无读数时</th></tr></thead>
       <tbody>
-        <tr><td><span class="dot" style="background:#3f5bd9"></span>必须</td><td><code>t_h</code></td><td>时间轴，严格递增</td><td>无法计算</td></tr>
-        <tr><td><span class="dot" style="background:#3f5bd9"></span>必须</td><td><code>stage[4]</code></td><td>睡眠分期 → m / λ / ψ，决定夜里充多快</td><td>m=0，全程清醒：07:00 的 E 从 0.71 掉到 0.37</td></tr>
-        <tr><td><span class="dot" style="background:#3f5bd9"></span>必须</td><td><code>hr</code></td><td>主观测通道 + 负荷 TRIMP</td><td>退化为开环，只剩先验，置信带宽 = 0</td></tr>
-        <tr><td><span class="dot" style="background:#a8650f"></span>建议</td><td><code>hrv_log</code></td><td>第二观测通道（夜间信息最大）</td><td>只剩 HR 校正</td></tr>
-        <tr><td><span class="dot" style="background:#a8650f"></span>建议</td><td><code>steps_5m</code></td><td>负荷 L 与活动量 A 的主要来源</td><td>L 只由 HR 算；HR 也缺则 L=0</td></tr>
-        <tr><td><span class="dot" style="background:#a8650f"></span>建议</td><td><code>stress</code></td><td>β_P 消耗项（满量程 ≈ 3×β0）</td><td>少一项消耗，能量略偏高</td></tr>
-        <tr><td><span class="dot" style="background:#a8650f"></span>建议</td><td><code>tod</code></td><td>节律、日间观测窗口、基线分箱</td><td>按 t_h % 24 推断；起点非 00:00 会错位</td></tr>
-        <tr><td><span class="dot" style="background:#a8650f"></span>建议</td><td><code>q_hr / q_hrv</code></td><td>伪迹、摘表时关掉该点</td><td>默认 1（全部相信）：+6 bpm 偏差可把 E 拉偏 0.36</td></tr>
-        <tr><td><span class="dot" style="background:#2c7a4b"></span>可选</td><td><code>kcal</code></td><td>只影响活动量 A</td><td>A 只由步数算</td></tr>
-        <tr><td><span class="dot" style="background:#2c7a4b"></span>可选</td><td><code>load / activity</code></td><td>上游已算好时直接传</td><td>库内部按固定规则计算</td></tr>
+        <tr><td><code>t_h</code></td><td>时间轴，严格递增</td><td>无法计算</td></tr>
+        <tr><td><code>stage[4]</code></td><td>睡眠分期 → m / λ / ψ，决定夜里充多快</td><td>m=0，全程清醒：07:00 的 E 从 0.71 掉到 0.37</td></tr>
+        <tr><td><code>hr</code></td><td>主观测通道 + 负荷 TRIMP</td><td>退化为开环，只剩先验，置信带宽 = 0</td></tr>
+        <tr><td><code>hrv_log</code></td><td>第二观测通道（夜间信息最大）</td><td>只剩 HR 校正</td></tr>
+        <tr><td><code>steps_5m</code></td><td>负荷 L 与活动量 A 的主要来源</td><td>L 只由 HR 算；HR 也缺则 L=0</td></tr>
+        <tr><td><code>stress</code></td><td>β_P 消耗项（满量程 ≈ 3×β0）</td><td>少一项消耗，能量略偏高</td></tr>
+        <tr><td><code>tod</code></td><td>节律、日间观测窗口、基线分箱</td><td>按 t_h % 24 推断；起点非 00:00 会错位</td></tr>
+        <tr><td><code>q_hr / q_hrv</code></td><td>伪迹、摘表时关掉该点</td><td>默认 1（全部相信）：+6 bpm 偏差可把 E 拉偏 0.36</td></tr>
+        <tr><td><code>kcal</code></td><td>只影响活动量 A</td><td>A 只由步数算</td></tr>
       </tbody>
     </table>
 
@@ -501,9 +500,9 @@ E∞ = α / (α + β);      E(t+h) = E∞ + (E − E∞) · e^(−(α+β)·h)</p
           <li>Joseph 形式：长期运行协方差不发散</li>
         </ul>
       </div>
-      <div class="card"><h4><span class="dot" style="background:#3f5bd9"></span>只跟自己比（v1.2）</h4>
+      <div class="card"><h4><span class="dot" style="background:#3f5bd9"></span>只跟自己比</h4>
         <ul>
-          <li>截距 b 是个人基线，不是群体常数（v1.1 夜间写死 58 bpm）</li>
+          <li>截距 b 是个人基线，不是群体常数</li>
           <li>心率整体平移 −10…+12 bpm：E 差异 0.000（合成数据）</li>
           <li>坏夜（高于自己常态）E 从 .825 降到 .503，次日回到 .853</li>
           <li>门控用个人残差：日间拒绝率 90.1% → 0.75%</li>
@@ -524,12 +523,12 @@ E∞ = α / (α + β);      E(t+h) = E∞ + (E − E∞) · e^(−(α+β)·h)</p
         <tr><td>持久化</td><td><code>energy_ctx_get_baseline()</code> 存进用户画像，下次经 <code>cfg.baseline.init</code> 传回即可跳过冷启动</td></tr>
       </tbody>
     </table>
-    <h3>日间方程、缺口与压力量纲（v1.2 修正）</h3>
+    <h3>日间方程、缺口与压力量纲</h3>
     <ul>
-      <li><b>活动量 A</b>：步数饱和曲线，<code>steps_ref = 500</code> 步/5 分钟（快走 ≈ 500–600 步 → A≈0.9）；活动对心率的系数 105 → 45 bpm。v1.1 下 120 步/5 分钟即算快走，午后 E&gt;0.98 的比例 13.5%，v1.2 为 0%。</li>
+      <li><b>活动量 A</b>：步数饱和曲线，<code>steps_ref = 500</code> 步/5 分钟（快走 ≈ 500–600 步 → A≈0.9）；活动对心率的系数 45 bpm。</li>
       <li><b>门控防失锁</b>：同一通道连续被 4σ 门控拒绝 6 次后改为降权接收。</li>
       <li><b>缺口 / 未佩戴</b>：缺口前输入最多沿用 1 小时；之后落在个人睡眠窗内按"软睡眠"推进，其余按清醒静息（L=0）推进，并打 <code>ENERGY_FLAG_GAP</code>。整夜未佩戴次日 07:30 E：0.094 → .853；3 小时缺口后流式负荷：1.0 → .006。</li>
-      <li><b>流式负荷</b>：未填画像时在线标定 hr_rest/hr_max/l_ref/hr_base，与批量同一套规则；同一时刻批量/流式 .944/.124（v1.1）→ .552/.517。</li>
+      <li><b>流式负荷</b>：未填画像时在线标定 hr_rest/hr_max/l_ref/hr_base，与批量同一套规则。</li>
       <li><b>压力量纲</b>：按整段/整条流判断（或 <code>cfg.stress_scale = 100</code>），不再把 0–100 量纲下的 1.2 分当成满分。</li>
     </ul>
     <p class="note">以上数字均来自合成数据（单元测试与审查探针），尚未在真实用户数据上验证。</p>
@@ -720,25 +719,23 @@ energy_ctx_step(&amp;ctx, &amp;sample, &amp;p);   <span class="c">/* p.energy = 
   <section id="verify">
     <div class="sec-head"><span class="sec-no">07</span><h2>性能与验证：数字有出处</h2></div>
     <div class="rule"></div>
-    <p>所有数字都来自仓库里的可复现命令：<code class="inl">make test</code>、<code class="inl">make sanitize</code>、<code class="inl">python scripts/check_parity.py 21</code>。与 Python 参考实现的对照是逐点的，不是“看起来差不多”。</p>
+    <p>所有数字都来自仓库里的 <code class="inl">make test</code>（合成数据）。</p>
 
     <div class="stats">
       <div class="stat g"><div class="n">81,794</div><div class="l">单元测试断言</div></div>
-      <div class="stat t"><div class="n">89.0%</div><div class="l">行覆盖率（gcov，v1.1 实测）</div></div>
-      <div class="stat i"><div class="n">9.9e-14</div><div class="l">与 Python 的最大能量偏差（v1.1；v1.2 个体基线无 Python 对应）</div></div>
-      <div class="stat a"><div class="n">26 ms</div><div class="l">21 天 6048 点（批量，v1.1 实测）</div></div>
+      <div class="stat t"><div class="n">40,489</div><div class="l">精力层测试断言</div></div>
+      <div class="stat i"><div class="n">12,121</div><div class="l">主接口层测试断言</div></div>
+      <div class="stat a"><div class="n">0</div><div class="l">失败</div></div>
     </div>
 
     <table>
-      <thead><tr><th>路径</th><th>21 天 / 6048 点</th><th>每点</th><th>说明</th></tr></thead>
+      <thead><tr><th>命令</th><th>结果</th></tr></thead>
       <tbody>
-        <tr><td>批量 <code>energy_compute</code></td><td>26 ms</td><td>4.3 µs</td><td>含负荷标定、EKF、展示、日汇总</td></tr>
-        <tr><td>流式 <code>energy_ctx_step</code></td><td>18 ms</td><td>3.0 µs</td><td>无 malloc，栈帧 432 B</td></tr>
-        <tr><td>Python 参考实现</td><td>762 ms</td><td>—</td><td>同数据、同参数，约 28×</td></tr>
+        <tr><td><code>make test</code></td><td>能量 81,794 / 精力 40,489 / 主接口 12,121 条断言，0 失败</td></tr>
       </tbody>
     </table>
 
-    <div class="note"><b>对照口径：</b>同一份 21 天合成数据、同一组参数与观测模型、同样的过程噪声；EKF 与开环两条路径都比对。残差来自 CSV 往返的十进制舍入。</div>
+    <div class="note"><b>口径：</b>测试数据为合成数据；流式与批量两条路径逐点一致，主接口层输出与底层引擎逐位一致。</div>
   </section>
 
   <!-- 8 -->
@@ -750,7 +747,7 @@ energy_ctx_step(&amp;ctx, &amp;sample, &amp;p);   <span class="c">/* p.energy = 
         <ul>
           <li>异常夜冻结与二次回放（上层编排）</li>
           <li>睡眠 episode 报告与冷启动文案</li>
-          <li>离线拟合（用 Python 端产出 fit.json）</li>
+          <li>离线参数拟合（不在设备端做）</li>
           <li>医学诊断、疾病预警、感染预测</li>
         </ul>
       </div>
@@ -767,7 +764,7 @@ energy_ctx_step(&amp;ctx, &amp;sample, &amp;p);   <span class="c">/* p.energy = 
   </section>
 
   <footer>
-    <span>energy-state-c v1.2.0 · C99 · 单头文件 · 无第三方依赖</span>
+    <span>evobeing v2.0.0 · zhenghuimin · C99 · 无第三方依赖</span>
     <span>技术说明 · 图表基于真实实现与实测数据</span>
   </footer>
 </div>
