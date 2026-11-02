@@ -7,6 +7,7 @@
 | 精力 · 产品说明 | 产品 / 设计 / 运营 | [vitality_product.html](vitality_product.html) | [vitality_product.pdf](vitality_product.pdf) |
 | 精力 · 技术说明 | 算法 / 后端 / 客户端 | [vitality_technical.html](vitality_technical.html) | [vitality_technical.pdf](vitality_technical.pdf) |
 | 精力 · 算法设计 | 算法 | [vitality_design.md](vitality_design.md)（Mermaid 流程图，GitHub 直接渲染） | — |
+| 行为归因 · 设计 | 算法 / 客户端 | [behavior_impact_design.md](behavior_impact_design.md) | — |
 
 这些文档都是**自包含 HTML**（内联 SVG、无外部图片/字体请求），直接双击用浏览器打开即可；PDF 由同一份 HTML 打印生成，适合在 GitLab 里直接预览或转发。
 

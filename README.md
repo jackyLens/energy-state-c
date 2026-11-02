@@ -19,11 +19,14 @@ include/evobeing_zhenghuimin.h   主接口：两个计算函数 + 初始化 + �
 src/evobeing_zhenghuimin.c       主接口实现（编排）
 include/energy.h  src/energy.c   能量引擎（ODE + EKF，个人基线学习，缺口处理）
 include/vitality.h src/vitality.c 精力引擎（偏离量 D 的标量卡尔曼滤波，事件，晨起初始化）
+include/evobeing_behavior_zhenghuimin.h
+src/evobeing_behavior_zhenghuimin.c 行为归因：过去 28 天各行为对晨起精力的影响百分比（独立离线模块，手机端 / 云端）
 src/energy_internal.h            仅测试使用
 src/main.c                       命令行：CSV 进 → CSV 出
 examples/evobeing_demo.c         主接口调用示例（3 天合成数据）
 examples/stream_demo.c           能量引擎流式示例
 examples/vitality_demo.c         精力引擎示例（事件日、短睡夜、血氧不稳夜）
+examples/behavior_demo.c         行为归因示例（28 天合成行为日志）
 tests/                           单元测试
 docs/                            算法与产品说明
 ```
@@ -104,7 +107,7 @@ evobeing_get_profile_zhenghuimin(&ctx, &profile);    /* 保存；下次 init 传
 
 ```bash
 make            # 库、命令行、测试、示例
-make test       # 三套单元测试
+make test       # 四套单元测试
 make example    # 运行示例
 ./build/energy_cli data/sample_panel.csv --vitality --out out.csv
 ```
@@ -132,6 +135,8 @@ E(t+h) = E∞ + (E − E∞)·e^(−(α+β)·h)
 每天醒来时 D 重置为晨起初始化值，由本夜能量回充量、醒前 HRV、睡眠结构、夜间血氧平稳度相对本人常态的偏差给出，
 `|D_init| ≤ 0.2`。日间血氧不参与计算：健康人静息血氧稳定在 96–99%，变化在传感器噪声之内。
 
+**行为归因**（独立模块，不经过两个主函数）：以每天起床时刻的精力初始值为目标，过去 28 天的行为记录（饮酒、咖啡、小睡、运动、冥想、晚睡……，统一为"行为 + 时间点"，归到之后的第一次起床）生成 0/1 列，加上周末、前一天精力、趋势三个控制列做近期加权的岭回归，系数除以本人均值即"有该行为的早晨比平时高 / 低 X%"；自助法给 90% 区间和高 / 中 / 低可信度；行为出现不足 4 次或对照不足 4 天不给数字。各项之和不必为 100%，另给"记录的行为合计解释 X%"。
+
 详细推导、参数表与图见 `docs/`。
 
 ## 文档
@@ -143,6 +148,7 @@ E(t+h) = E∞ + (E − E∞)·e^(−(α+β)·h)
 | [docs/vitality_technical.html](docs/vitality_technical.html) · [PDF](docs/vitality_technical.pdf) | 精力：级联结构、倒 U 观测、事件、晨起初始化、夜间血氧 |
 | [docs/vitality_product.html](docs/vitality_product.html) · [PDF](docs/vitality_product.pdf) | 精力：能量与精力并排怎么读、四象限、手动标记 |
 | [docs/vitality_design.md](docs/vitality_design.md) | 精力：模型推导、参数表、决策记录 |
+| [docs/behavior_impact_design.md](docs/behavior_impact_design.md) | 行为归因：方法、百分比口径、函数输入输出、测试覆盖 |
 
 ## 约定
 

@@ -4,13 +4,13 @@ CFLAGS  ?= -O2 -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -Wpedantic -Wshadow -Wco
 INC     := -Iinclude
 BUILD   := build
 
-LIB_SRC  := src/energy.c src/vitality.c src/evobeing_zhenghuimin.c
-LIB_OBJ  := $(BUILD)/energy.o $(BUILD)/vitality.o $(BUILD)/evobeing_zhenghuimin.o
-HDRS     := include/energy.h include/vitality.h include/evobeing_zhenghuimin.h src/energy_internal.h
+LIB_SRC  := src/energy.c src/vitality.c src/evobeing_zhenghuimin.c src/evobeing_behavior_zhenghuimin.c
+LIB_OBJ  := $(BUILD)/energy.o $(BUILD)/vitality.o $(BUILD)/evobeing_zhenghuimin.o $(BUILD)/evobeing_behavior_zhenghuimin.o
+HDRS     := include/energy.h include/vitality.h include/evobeing_zhenghuimin.h include/evobeing_behavior_zhenghuimin.h src/energy_internal.h
 
 .PHONY: all lib test example docs clean
 
-all: $(BUILD)/energy_cli $(BUILD)/test_energy $(BUILD)/test_vitality $(BUILD)/test_evobeing $(BUILD)/stream_demo $(BUILD)/vitality_demo $(BUILD)/evobeing_demo
+all: $(BUILD)/energy_cli $(BUILD)/test_energy $(BUILD)/test_vitality $(BUILD)/test_evobeing $(BUILD)/test_behavior $(BUILD)/stream_demo $(BUILD)/vitality_demo $(BUILD)/evobeing_demo $(BUILD)/behavior_demo
 
 lib: $(BUILD)/libenergy.a
 
@@ -35,6 +35,12 @@ $(BUILD)/test_vitality: tests/test_vitality.c $(BUILD)/libenergy.a $(HDRS)
 $(BUILD)/test_evobeing: tests/test_evobeing.c $(BUILD)/libenergy.a $(HDRS)
 	$(CC) $(CFLAGS) $(INC) $< $(BUILD)/libenergy.a -lm -o $@
 
+$(BUILD)/test_behavior: tests/test_behavior.c $(BUILD)/libenergy.a $(HDRS)
+	$(CC) $(CFLAGS) $(INC) $< $(BUILD)/libenergy.a -lm -o $@
+
+$(BUILD)/behavior_demo: examples/behavior_demo.c $(BUILD)/libenergy.a $(HDRS)
+	$(CC) $(CFLAGS) $(INC) $< $(BUILD)/libenergy.a -lm -o $@
+
 $(BUILD)/stream_demo: examples/stream_demo.c $(BUILD)/libenergy.a $(HDRS)
 	$(CC) $(CFLAGS) $(INC) $< $(BUILD)/libenergy.a -lm -o $@
 
@@ -44,13 +50,15 @@ $(BUILD)/vitality_demo: examples/vitality_demo.c $(BUILD)/libenergy.a $(HDRS)
 $(BUILD)/evobeing_demo: examples/evobeing_demo.c $(BUILD)/libenergy.a $(HDRS)
 	$(CC) $(CFLAGS) $(INC) $< $(BUILD)/libenergy.a -lm -o $@
 
-test: $(BUILD)/test_energy $(BUILD)/test_vitality $(BUILD)/test_evobeing
+test: $(BUILD)/test_energy $(BUILD)/test_vitality $(BUILD)/test_evobeing $(BUILD)/test_behavior
 	@$(BUILD)/test_energy
 	@$(BUILD)/test_vitality
 	@$(BUILD)/test_evobeing
+	@$(BUILD)/test_behavior
 
-example: $(BUILD)/evobeing_demo $(BUILD)/stream_demo $(BUILD)/vitality_demo
+example: $(BUILD)/evobeing_demo $(BUILD)/stream_demo $(BUILD)/vitality_demo $(BUILD)/behavior_demo
 	@$(BUILD)/evobeing_demo
+	@$(BUILD)/behavior_demo
 	@$(BUILD)/stream_demo
 	@$(BUILD)/vitality_demo
 
