@@ -32,8 +32,10 @@
  *
  * 可信度
  * ------
- *   28 天内行为至少出现 min_with 次、且至少 min_without 天没出现，才给出数字，否则
- *   status = INSUFFICIENT（"再记录几次就能看到"）。给出数字时按自助法区间宽度分三档：
+ *   28 天内行为至少出现 min_with 次才可分析。如果行为每天都出现（n_without = 0），主列
+ *   全 1 无方差、回归无法估计主效应，主变体标记 INSUFFICIENT；但若该行为配有时间细分
+ *   （late_hour），晚间子列仍可能有方差，此时晚间变体可以给出"晚 vs 早"的时间效应。
+ *   给出数字时按自助法区间宽度分三档：
  *   HIGH（区间不跨 0 且 n 够多）、MID、LOW。越近的日子权重越高（半衰期 half_life_days）。
  *
  * 用法
@@ -100,7 +102,7 @@ typedef struct {
     int window_days;      /* 分析窗口，28；取输入最后 window_days 天 */
     double half_life_days;/* 近期权重半衰期，14：14 天前的一天权重 0.5 */
     int min_with;         /* 行为至少出现次数，4 */
-    int min_without;      /* 至少几天没出现，4 */
+    int min_without;      /* 保留字段，默认 0（不限制）；>0 时行为需至少 N 天没出现才计算主列 */
     double ridge;         /* 岭回归收缩强度：相当于加 ridge 个"效应为 0 的伪日"，2.0 */
     int n_boot;           /* 自助法重采样次数，200；0 = 不算区间 */
     unsigned seed;        /* 自助法随机种子，默认 12345 */

@@ -30,7 +30,7 @@ void evobeing_behavior_config_default(evobeing_behavior_config_t *c)
     c->window_days = 28;
     c->half_life_days = 14.0;
     c->min_with = 4;
-    c->min_without = 4;
+    c->min_without = 0;   /* 不再要求必须有"没出现"的天数 */
     c->ridge = 2.0;
     c->n_boot = 200;
     c->seed = 12345u;
@@ -245,9 +245,12 @@ int evobeing_behavior_impact_zhenghuimin(const evobeing_behavior_input_t *in,
         col_of[t] = -1; late_col_of[t] = -1; has_late[t] = 0;
         if (!has_type[t]) continue;
         for (d = 0; d < n; ++d) if (use[d]) { if (occ[t][d] > 0) ++nw; else ++nwo; if (late[t][d] > 0) ++nl; }
-        if (nw >= cfg.min_with && nwo >= cfg.min_without) {
-            col_of[t] = p++;
-            /* 晚间列：晚间次数够、且不是全部都在晚间（否则与主列共线，没有额外信息） */
+        if (nw >= cfg.min_with) {
+            /* 主列：nwo > 0 且满足 min_without（默认 0 = 不限）才加；
+               nwo == 0 时全 1、中心化后无方差，回归无法估计 */
+            if (nwo > 0 && nwo >= cfg.min_without) col_of[t] = p++;
+            /* 晚间列：独立于主列，只需晚间次数够且不是全部都在晚间（否则与主列共线）；
+               天天都有行为但时间有差异时，晚间列仍能估计时间效应 */
             if (lh[t] == lh[t] && nl >= cfg.min_with && nl < nw) { late_col_of[t] = p++; has_late[t] = 1; }
         }
     }
@@ -342,8 +345,8 @@ int evobeing_behavior_impact_zhenghuimin(const evobeing_behavior_input_t *in,
                 it->share_pct = 0.0;
                 it->status = EVOBEING_BEHAVIOR_INSUFFICIENT;
                 if (c < 0) continue;
-                /* 晚间子项的效应 = 主列 + 晚间列（晚间发生时的总效应） */
-                it->effect_points = variant ? b[col_of[t]] + b[c] : b[c];
+                /* 晚间子项：主列存在时 = 主 + 晚间（vs 完全没有），主列不存在时 = 晚间列本身（vs 非晚间时段） */
+                it->effect_points = (variant && col_of[t] >= 0) ? b[col_of[t]] + b[c] : b[c];
                 it->effect_pct = ybar > 0 ? 100.0 * it->effect_points / ybar : NAN_V;
                 {
                     double r2d = weighted_r2(X, yc, w, use, n, p, pen, c, NULL);
@@ -355,7 +358,7 @@ int evobeing_behavior_impact_zhenghuimin(const evobeing_behavior_input_t *in,
                     double tmp[512];
                     int lo_i = (int)floor(0.05 * (n_boot - 1)), hi_i = (int)ceil(0.95 * (n_boot - 1));
                     for (k = 0; k < n_boot; ++k)
-                        tmp[k] = variant ? boot_b[col_of[t]][k] + boot_b[c][k] : boot_b[c][k];
+                        tmp[k] = (variant && col_of[t] >= 0) ? boot_b[col_of[t]][k] + boot_b[c][k] : boot_b[c][k];
                     qsort(tmp, (size_t)n_boot, sizeof(double), cmp_double);
                     it->ci_lo_pct = 100.0 * tmp[lo_i] / ybar;
                     it->ci_hi_pct = 100.0 * tmp[hi_i] / ybar;

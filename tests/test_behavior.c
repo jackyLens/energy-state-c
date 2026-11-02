@@ -135,7 +135,7 @@ int main(void)
                 const evobeing_behavior_item_t *it = &o.items[i];
                 if (it->status == EVOBEING_BEHAVIOR_INSUFFICIENT) continue;
                 CHECK(it->ci_lo_pct <= it->effect_pct + 3.0 && it->ci_hi_pct >= it->effect_pct - 3.0, "ci around estimate");
-                CHECK(it->n_with >= 4 && it->n_without >= 4, "gating");
+                CHECK(it->n_with >= 4, "gating n_with");
             }
         }
         printf("  饮酒方向正确 %d/%d（均值 %.1f 分，真值 −9），小睡 %d/%d（%.1f，真值 +4），运动 %d/%d（%.1f，真值 +3），晚间咖啡 %d\n",
@@ -190,12 +190,57 @@ int main(void)
         CHECK(o.items[0].share_pct == 0.0, "share 0");
         CHECK(o.n_insufficient == 1, "n_insufficient");
         CHECK(o.unexplained_pct == 100.0, "all unexplained");
-        /* 每天都有 → 没有对照 → 同样不给 */
+        /* 几乎每天都有（27/28 天，nwo=1）→ 主列可加入回归，但置信度低 */
         w.n_ev = 0;
         for (i = 0; i < 27; ++i) { w.ev[w.n_ev].id = EVOBEING_BEHAVIOR_CAFFEINE; w.ev[w.n_ev++].t_h = i * 24 + 9.0; }
         run(&w, NULL, &o, &rc);
-        CHECK(o.n_behaviors == 1 && o.items[0].status == EVOBEING_BEHAVIOR_INSUFFICIENT, "no control days");
-        CHECK(o.items[0].n_without < 4, "n_without small");
+        CHECK(o.n_behaviors == 1, "one behavior");
+        CHECK(o.items[0].n_without == 1, "n_without 1");
+        /* nwo=1 时主列可回归，应给出数字（不再要求 n_without>=4）；但 status 应为 LOW */
+        if (o.items[0].status != EVOBEING_BEHAVIOR_INSUFFICIENT) {
+            CHECK(o.items[0].status == EVOBEING_BEHAVIOR_LOW, "low confidence with 1 control day");
+            CHECK(o.items[0].effect_pct == o.items[0].effect_pct, "effect not NAN");
+        }
+
+        /* 真正天天都有（28/28 天，nwo=0）→ 主列全 1、主变体 INSUFFICIENT
+           事件放在每天 5:00（早于 wake 7:00），确保归到当天 */
+        w.n_ev = 0;
+        for (i = 0; i < 28; ++i) { w.ev[w.n_ev].id = EVOBEING_BEHAVIOR_CAFFEINE; w.ev[w.n_ev++].t_h = i * 24 + 5.0; }
+        run(&w, NULL, &o, &rc);
+        {
+            const evobeing_behavior_item_t *c0 = find(&o, EVOBEING_BEHAVIOR_CAFFEINE, 0);
+            CHECK(c0 != NULL, "caffeine main present");
+            CHECK(c0->status == EVOBEING_BEHAVIOR_INSUFFICIENT, "main insufficient when nwo=0");
+            CHECK(c0->n_without == 0, "n_without 0");
+        }
+
+        /* 天天都有 + 部分在下午（晚间）→ 主变体 INSUFFICIENT，晚间变体可给数字
+           day 0: 事件 5:00（归当天，tod=5，不算晚间）
+           day d>0: 事件在前一天 9:00 或 15:00（归到 day d，tod=9 或 15） */
+        w.n_ev = 0;
+        for (i = 0; i < 28; ++i) {
+            w.ev[w.n_ev].id = EVOBEING_BEHAVIOR_CAFFEINE;
+            if (i == 0) {
+                w.ev[w.n_ev++].t_h = 5.0;                            /* 归 day 0 */
+            } else {
+                w.ev[w.n_ev++].t_h = (i - 1) * 24.0 + (i % 3 == 0 ? 15.0 : 9.0); /* 归 day i */
+            }
+        }
+        run(&w, NULL, &o, &rc);
+        {
+            const evobeing_behavior_item_t *c0 = find(&o, EVOBEING_BEHAVIOR_CAFFEINE, 0);
+            const evobeing_behavior_item_t *c1 = find(&o, EVOBEING_BEHAVIOR_CAFFEINE, 1);
+            CHECK(c0 != NULL, "caffeine main present");
+            CHECK(c0->status == EVOBEING_BEHAVIOR_INSUFFICIENT, "main insufficient");
+            CHECK(c1 != NULL, "caffeine late variant present");
+            /* 晚间变体应有数字：nl=9 (i%3==0 且 i>0 → day 3,6,9,12,15,18,21,24,27)
+               nl>=4 ✓ 且 nl<nw (9<28) ✓ */
+            if (c1) {
+                printf("    天天喝咖啡 + 部分下午：late status=%d effect=%.1f%%\n",
+                       c1->status, c1->effect_pct);
+                CHECK(c1->status != EVOBEING_BEHAVIOR_INSUFFICIENT, "late variant has estimate");
+            }
+        }
     }
 
     printf("[4] 混杂控制：饮酒只在周五/六，周末本身也影响精力\n");
