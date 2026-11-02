@@ -1,9 +1,9 @@
 # 行为对晨起精力的影响：设计方案
 
 模块：`include/evobeing_behavior_zhenghuimin.h` / `src/evobeing_behavior_zhenghuimin.c`
-测试：`tests/test_behavior.c`（707 项断言）　示例：`examples/behavior_demo.c`
+测试：`tests/test_behavior.c`　示例：`examples/behavior_demo.c`
 
-## 1. 要解决的问题
+## 1. 目标
 
 每天早上起床，精力引擎给出一个 0–100 的初始值。用户想知道：过去 28 天里，我做过的哪些事（饮酒、咖啡、小睡、运动、晚睡……）让第二天早上的精力变好或变差了，各占多少。
 
